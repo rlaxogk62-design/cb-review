@@ -195,6 +195,59 @@ def plain(rcept_no):
     return re.sub(r"\s+", " ", t)
 
 
+_squashed = {}
+
+
+def _sq(s):
+    return re.sub(r"\s+", "", str(s or ""))
+
+
+def _variants(text):
+    t = _sq(text)
+    out = [t]
+    d = kdate(text)
+    if d and re.fullmatch(r"[\d년월일.\-/()]+", t):
+        y, m, dd = d.split("-")
+        mi, di = int(m), int(dd)
+        out += [f"{y}.{m}.{dd}", f"{y}.{mi}.{di}", f"{y}-{m}-{dd}", f"{y}년{mi}월{di}일", f"{y}년{m}월{dd}일",
+                f"{y}/{m}/{dd}", f"{y}{m}{dd}"]
+    v = num(text)
+    if v is not None and re.fullmatch(r"[-\d,.%원주]+", t):
+        if float(v).is_integer():
+            out += [f"{int(v):,}", str(int(v))]
+        else:
+            out += [f"{v:,}", f"{v:g}", str(v)]
+    return list(dict.fromkeys(x for x in out if x))
+
+
+def locate_evidence(e):
+    """근거를 원문에서 찾는다 (화면 형광펜과 같은 방식: 공백 무시, 항목명 뒤 6,000자 안 우선).
+    → (찾음 여부, 원문에 있는 표기)"""
+    rc = e.get("rcept_no")
+    if not rc:
+        return False, e.get("text")
+    if rc not in _squashed:
+        try:
+            _squashed[rc] = _sq(plain(rc))
+        except Exception:
+            _squashed[rc] = None
+    s = _squashed[rc]
+    if s is None:
+        return False, e.get("text")
+    lab = _sq(e.get("label"))
+    for v in _variants(e.get("text")):
+        if lab:
+            p = s.find(lab)
+            while p >= 0:
+                q = s.find(v, p + len(lab))
+                if 0 <= q and q - p < 6000:
+                    return True, v
+                p = s.find(lab, p + 1)
+        if v in s or (len(v) > 18 and v[:18] in s):
+            return True, v
+    return False, e.get("text")
+
+
 PRICE_KEY = {"CB": "cv_prc", "BW": "ex_prc", "EB": "ex_prc"}
 PERIOD_KEYS = {"CB": ("cvrqpd_bgd", "cvrqpd_edd"), "BW": ("expd_bgd", "expd_edd"), "EB": ("exrqpd_bgd", "exrqpd_edd")}
 SHARES_KEY = {"CB": ("cvisstk_cnt", "cvisstk_tisstk_vs"), "BW": ("nstk_isstk_cnt", "nstk_isstk_tisstk_vs"),
