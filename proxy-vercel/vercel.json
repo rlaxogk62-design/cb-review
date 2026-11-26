@@ -1,0 +1,6 @@
+{
+  "regions": ["icn1"],
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/api/proxy?__p=$1" }
+  ]
+}
