@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DART 복합금융상품 리뷰 대시보드</title>
+<link rel="stylesheet" href="css/style.css?v=202611261453">
+<link rel="stylesheet" href="css/web.css?v=202611261453">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="bar"></span><b>복합금융상품 리뷰</b><span class="sub">DART 자동 입력 대시보드</span></div>
+  <div class="topr"><span id="engineStatus" class="badge busy">파이썬 엔진 준비 중…</span><button id="btnProxy" class="badge" title="DART·야후 조회를 대신 받아 주는 중계 서버 주소">중계 서버 설정</button></div>
+</header>
+
+<main>
+  <div id="proxyBox" class="card proxybox hidden">
+    <div class="cardhead"><span class="kicker">설정</span>중계 서버 주소 (Cloudflare Worker)</div>
+    <div class="note">브라우저는 DART·야후에 직접 접속할 수 없어서 중계 서버를 거칩니다. 만드는 방법:
+      <a href="https://github.com/rlaxogk62-design/cb-review#중계-서버-설정" target="_blank" rel="noopener">README</a></div>
+    <div class="searchrow" style="margin-top:8px">
+      <input id="proxyUrl" placeholder="https://cb-review-proxy.○○.workers.dev" autocomplete="off">
+      <button id="btnProxySave" class="primary">연결 확인·저장</button><button id="btnProxyClose">닫기</button>
+    </div>
+    <div id="proxyMsg" class="note"></div>
+  </div>
+  <section class="hero">
+    <div class="eyebrow">상장사 CB · BW · EB</div>
+    <h1>공시를 불러오면 입력·평가·리뷰 엑셀까지</h1>
+    <p>회사를 검색하고 회차를 고르면 DART 공시에서 발행조건·조정 이력·잔액을 채웁니다. 입력칸을 누르면 오른쪽 원문에서 근거 문구에 형광펜이 칠해집니다.</p>
+    <p class="privacy">계산과 엑셀 만들기는 모두 이 브라우저 안에서 합니다. 입력값·평가 결과는 어디에도 저장·전송되지 않고, DART 공시와 주가 조회만 중계 서버를 거칩니다.</p>
+    <div class="searchrow">
+      <input id="q" placeholder="회사명 또는 종목코드 6자리" autocomplete="off">
+      <button id="btnSearch" class="primary">검색</button>
+      <label class="vd">평가기준일<input type="date" id="val_date"></label>
+    </div>
+    <div id="corpList" class="chips"></div>
+    <div id="issueList" class="issues"></div>
+  </section>
+
+  <div id="newBanner" class="banner hidden"></div>
+  <div id="work" class="work hidden">
+    <div class="left">
+      <div class="card" id="metaCard">
+        <div class="cardhead"><span class="kicker">1</span>평가 정보</div>
+        <div class="grid2">
+          <label>평가사(평가업체)<input id="appraiser" placeholder="예: ○○회계법인"></label>
+          <label>연 Step 수 (Temp 기타코드 앞 2자리)<input type="number" id="steps_per_year" value="52"></label>
+          <label>액면가(주당, Temp AI열)<input id="par_value" placeholder="예: 100"></label>
+          <label class="check"><input type="checkbox" id="issue_basis"> 발행일 기준 평가 (전체FV = 발행금액, 전환권은 끼워맞춤 — 리뷰 양식 1.2)</label>
+          <label class="check"><input type="checkbox" id="use_tables" checked> 공시 일정표의 Put·Call 상환율을 그대로 사용 (끄면 시작일·연 횟수·이율로 계산)</label>
+        </div>
+        <div class="legend"><span class="dot high"></span>공시에서 확인 <span class="dot mid"></span>공시+계산 <span class="dot low"></span>기본값·확인 필요 <span class="dot manual"></span>직접 수정</div>
+      </div>
+
+      <div id="fieldCards"></div>
+
+      <div class="card">
+        <div class="cardhead"><span class="kicker">5</span>기초자산 — 평가기준일 기준 자동 <span class="muted" id="mktSrc"></span></div>
+        <div class="grid2">
+          <label>주가(원, Temp DS열)<input id="S" inputmode="decimal"></label>
+          <label>변동성(연, 소수 · Temp DT열)<input id="sigma" inputmode="decimal" placeholder="예: 0.7856"></label>
+          <label class="wide">변동성 방식<select id="volMethod">
+            <option value="temp">Temp S_vol — 최근 180개 수익률 × √(1년 관측일수)</option>
+            <option value="iqr">1년 + 이상치 조정(IQR 1.5배) × √250 — 평가사(KAP) backdata 방식</option></select></label>
+          <label>측정기간 (S_vol C3)<select id="period"><option>1년</option><option>잔여만기</option></select></label>
+          <label>측정일수 (S_vol G2)<input type="number" id="window" value="180"></label>
+        </div>
+        <button id="btnMarket" class="ghost">주가·변동성 다시 불러오기</button>
+        <div id="marketNote" class="note">회차를 고르면 야후 파이낸스에서 받아 Temp S_vol 방식으로 계산합니다.</div>
+      </div>
+
+      <div class="card">
+        <div class="cardhead"><span class="kicker">6</span>신용등급 · 할인율 곡선 (연 %) — 직접 입력 <span id="curveCount" class="muted"></span></div>
+        <div class="grid2">
+          <label class="hidden">발행 구분 (곡선 종류)<select id="placement">
+            <option value="1">사모무보증 — 등급 그대로 (예: B0)</option>
+            <option value="0">공모무보증 — 공모부+등급 (예: 공모부B+)</option></select></label>
+          <label>곡선 등급코드 (Temp DU·EL열)<select id="credit_grade"></select></label>
+        </div>
+        <div id="niceBox" class="nice"></div>
+        <button id="btnCurves" class="ghost hidden">등급·곡선 다시 불러오기</button>
+        <label>Rf 국고채 — Temp DW 시트 DV~EK 16칸 (0.25 0.5 0.75 1 1.5 2 2.5 3 4 5 7 10 15 20 30 50년)
+          <textarea id="rf" rows="2" placeholder="2.79	3.01	3.24	3.34 …"></textarea></label>
+        <label>Rd 등급별 — EM~EZ 14칸 (0.25 ~ 20년)
+          <textarea id="rd" rows="2" placeholder="9.695	10.739	11.781 …"></textarea></label>
+        <div class="note" id="curveNote">입력값은 3개월 이표 YTM으로 보고 zero 금리로 부트스트랩합니다.</div>
+      </div>
+
+      <div class="card">
+        <div class="cardhead"><span class="kicker">7</span>평가사 보고서 값 (원) — 차이 계산용 · Temp N~R열</div>
+        <div class="grid2" id="reportGrid"></div>
+      </div>
+
+      <div class="actions">
+        <button id="btnValue" class="primary big">평가 계산</button>
+        <button id="btnReview2" class="primary" title="계산 전이면 자동으로 계산한 뒤 내려받습니다">리뷰 엑셀 받기</button>
+        <button id="btnDW2" class="primary alt">Temp DW 입력용 엑셀 받기</button>
+      </div>
+
+      <div class="card hidden" id="resultCard">
+        <div class="cardhead"><span class="kicker">8</span>평가 결과 <span class="tag warn">참고 추정치 · 확정은 Temp</span></div>
+        <table class="res" id="resTable"></table>
+        <div class="note" id="resInfo"></div>
+        <div class="note">계산 규칙은 Temp_v530 시트 수식과 같습니다 (Call = 한도 × (Call 있음 − Call 없음), 선순위 Call은 Call 말일까지 전환 불가, Δt = 1/52,
+          리픽싱은 X 시트 경로확률 방식). 실무 검증 4건: 일반사채·Put은 Temp와 0.00%, Call 0.3% 이내, 합계 0.1% 이내.</div>
+        <label>결론 (Con)<textarea id="conclusion" rows="2">특이사항 없음.</textarea></label>
+        <div class="actions">
+          <button id="btnReview" class="primary">리뷰 엑셀 받기</button>
+          <button id="btnDW" class="primary alt">Temp DW 입력용 엑셀 받기</button>
+        </div>
+      </div>
+    </div>
+
+    <aside class="right">
+      <div class="card sticky alertcard">
+        <div class="cardhead"><span class="kicker">!</span>유의 포인트 <span class="muted" id="alertCount"></span></div>
+        <div id="alerts" class="alerts"></div>
+      </div>
+      <div class="card doccard">
+        <div class="cardhead"><span class="kicker">원문</span><span id="docTitle">입력칸을 누르면 근거가 여기 표시됩니다</span>
+          <a id="docLink" target="_blank" rel="noopener" class="link hidden">DART에서 열기 ↗</a></div>
+        <div id="evBox" class="evbox hidden"></div>
+        <iframe id="doc" sandbox="allow-same-origin" title="공시 원문"></iframe>
+      </div>
+    </aside>
+  </div>
+</main>
+<div id="toast" class="toast hidden"></div>
+<script src="js/config.js?v=202611261453"></script>
+<script src="js/web.js?v=202611261453"></script>
+<script src="js/app.js?v=202611261453"></script>
+</body>
+</html>
