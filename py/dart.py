@@ -480,9 +480,13 @@ def parse_cb(raw, kind="CB"):
     if (has_floor or refix_m) and not none_doc:
         put("상하향조정", "하", ev(rc, "전환가액 조정", refix_m.group(0)[:40]) if refix_m else None)
         seg = p[refix_m.start():refix_m.start() + 2500] if refix_m else ""
-        if seg and re.search(r"(?:높은|상회하는)\s*경우에는?\s*(?:동|그)?\s*높은\s*가액을\s*새로운\s*(?:전환|행사|교환)가"
-                             r"|(?:전환|행사|교환)가(?:액|격)을\s*상향\s*조정하는\s*경우|(?:높은|상회하는)\s*경우[^.]{0,80}상향", seg):
-            put("상하향조정", "상하", ev(rc, "전환가액 조정", "상향"),
+        up = seg and re.search(
+            r"(?:높은|상회하는)\s*경우에는?\s*[^.]{0,40}?(?:을|를)\s*새로운\s*(?:전환|행사|교환)\s*가(?:액|격)"
+            r"|(?:전환|행사|교환)가(?:액|격)을\s*상향\s*조정하는\s*경우"
+            r"|(?:높은|상회하는)\s*경우[^.]{0,80}상향"
+            r"|조정\s*후\s*(?:전환|행사|교환)\s*가(?:액|격)은\s*최초\s*(?:전환|행사|교환)\s*가(?:액|격)", seg)
+        if up:
+            put("상하향조정", "상하", ev(rc, "전환가액 조정", up.group(0)[:60]),
                 note="시가가 오르면 다시 올리는(상향) 조정 조항이 있습니다 — Temp 입력례 '상하' (최초 전환가까지).")
         mf = re.search(r"매\s*(\d+)\s*개월", refix_m.group(0)) if refix_m else None
         if not mf and refix_m:
