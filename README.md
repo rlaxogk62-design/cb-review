@@ -25,17 +25,21 @@
 
 ## 중계 서버 설정
 
-브라우저는 보안 규칙(CORS) 때문에 DART·야후에 직접 접속할 수 없습니다. Cloudflare Workers(무료, 하루 10만 건)에 중계 서버를 하나 만듭니다.
+브라우저는 보안 규칙(CORS) 때문에 DART·야후에 직접 접속할 수 없어서 중계 서버를 거칩니다.
+**DART는 해외 IP 접속을 막으므로 중계 서버는 한국 리전이어야 합니다** (Cloudflare Workers 무료는 홍콩에서 실행돼 막힘).
+그래서 Vercel 서버리스 함수를 서울 리전(`icn1`)으로 씁니다 — [`proxy-vercel/`](proxy-vercel/).
 
-1. <https://dash.cloudflare.com> 가입(무료) → 로그인
-2. **Workers & Pages → Create → Worker** → 이름 `cb-review-proxy` → **Deploy**
-3. **Edit code** → 이 저장소의 [`worker/worker.js`](worker/worker.js) 내용을 통째로 붙여넣기 → **Deploy**
-4. Worker의 **Settings → Variables and Secrets** 에서 추가 → **Deploy**
-   - `DART_API_KEY` — 종류 **Secret**, 값: DART OpenAPI 인증키 (<https://opendart.fss.or.kr> 에서 발급)
-   - `ALLOWED_ORIGIN` — 종류 Text, 값: `https://rlaxogk62-design.github.io`
-5. Worker 주소(`https://cb-review-proxy.<계정>.workers.dev`)를 복사 → 사이트 오른쪽 위 **[중계 서버 설정]** 에 붙여넣고 **연결 확인·저장**
+```
+cd proxy-vercel
+npx vercel login
+npx vercel deploy --prod --yes
+npx vercel env add DART_API_KEY production      # 값: DART OpenAPI 인증키 (Sensitive)
+npx vercel deploy --prod --yes                  # 키 반영
+```
 
-주소는 브라우저에 기억됩니다. 다른 사람도 바로 쓰게 하려면 사내 버전의 `web/site.json`의 `proxy`에 주소를 넣고 다시 빌드·업로드하세요.
+허용 사이트는 기본 `https://rlaxogk62-design.github.io` 이며, 환경변수 `ALLOWED_ORIGIN`(쉼표로 여러 개)으로 바꿀 수 있습니다.
+배포 주소를 사이트 오른쪽 위 **[중계 서버 설정]** 에 넣거나, 사내 버전 `web/site.json`의 `proxy`에 넣고 다시 빌드·업로드하세요.
+(`worker/`는 Cloudflare용 — 야후만 필요할 때 쓸 수 있습니다.)
 
 ## 업데이트
 
