@@ -49,7 +49,7 @@ export default {
       if (!env.DART_API_KEY) return text('중계 서버에 DART_API_KEY가 없습니다.', 500);
       const q = new URLSearchParams(url.search);
       q.set('crtfc_key', env.DART_API_KEY);
-      targets = [`https://opendart.fss.or.kr/api/${name}?${q}`];
+      targets = [`https://opendart.fss.or.kr/api/${name}?${q}`, `http://opendart.fss.or.kr/api/${name}?${q}`];
     } else if (kind === 'yahoo' && /^[0-9A-Z]{6}\.(KS|KQ)$/.test(name || '')) {
       targets = ['query1', 'query2'].map((h) => `https://${h}.finance.yahoo.com/v8/finance/chart/${name}${url.search}`);
       init = { headers: { 'User-Agent': 'Mozilla/5.0' } };
@@ -58,10 +58,23 @@ export default {
     }
 
     let r;
+    const errors = [];
     for (const t of targets) {
-      r = await fetch(t, init);
-      if (r.ok) break;
+      try {
+        r = await fetch(t, { ...init, redirect: 'manual' });
+        if (r.status >= 300 && r.status < 400) {
+          // DART는 막은 접속을 error 페이지로 돌린다. 주소에 인증키가 있으므로 오류 문구에 URL을 절대 넣지 않는다.
+          const loc = r.headers.get('Location') || '';
+          errors.push(loc.includes('error') ? '원본 서버가 이 중계 서버 위치에서의 접속을 막음' : `리다이렉트 ${r.status}`);
+          r = null;
+          continue;
+        }
+        if (r.ok) break;
+      } catch (e) {
+        errors.push(e.name || '접속 오류');
+      }
     }
+    if (!r) return text('원본 서버 접속 실패: ' + errors.join(' / '), 502);
     const out = new Response(r.body, r);
     for (const [k, v] of Object.entries(cors)) out.headers.set(k, v);
     out.headers.delete('Set-Cookie');
