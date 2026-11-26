@@ -1,0 +1,8 @@
+# Cloudflare Worker 배포 설정 (npx wrangler deploy). DART_API_KEY는 여기 넣지 말고 secret으로 등록한다.
+name = "cb-review-proxy"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+workers_dev = true
+
+[vars]
+ALLOWED_ORIGIN = "https://rlaxogk62-design.github.io"
