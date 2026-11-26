@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DART 복합금융상품 리뷰 대시보드</title>
-<link rel="stylesheet" href="css/style.css?v=202611261537">
-<link rel="stylesheet" href="css/web.css?v=202611261537">
+<link rel="stylesheet" href="css/style.css?v=202611261621">
+<link rel="stylesheet" href="css/web.css?v=202611261621">
 </head>
 <body>
 <header class="top">
@@ -92,6 +92,12 @@
         <div class="grid2" id="reportGrid"></div>
       </div>
 
+      <div class="card">
+        <div class="cardhead"><span class="kicker">대조</span>평가보고서 가정 ↔ 공시 대조 <span class="muted" id="assumeCount"></span></div>
+        <div class="note" style="margin:-4px 0 8px">평가보고서에 쓰인 가정을 넣으면 공시·대시보드 값과 비교합니다. 빈 칸은 비교하지 않습니다. 결과는 리뷰 엑셀 '가정 대조' 시트에 들어갑니다.</div>
+        <table class="res assume" id="assumeTable"></table>
+      </div>
+
       <div class="actions">
         <button id="btnValue" class="primary big">평가 계산</button>
         <button id="btnReview2" class="primary" title="계산 전이면 자동으로 계산한 뒤 내려받습니다">리뷰 엑셀 받기</button>
@@ -127,8 +133,8 @@
   </div>
 </main>
 <div id="toast" class="toast hidden"></div>
-<script src="js/config.js?v=202611261537"></script>
-<script src="js/web.js?v=202611261537"></script>
-<script src="js/app.js?v=202611261537"></script>
+<script src="js/config.js?v=202611261621"></script>
+<script src="js/web.js?v=202611261621"></script>
+<script src="js/app.js?v=202611261621"></script>
 </body>
 </html>

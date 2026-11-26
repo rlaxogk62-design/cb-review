@@ -829,7 +829,79 @@ RULES = [
 ]
 
 
-def alerts(corp_code, fields=None, items=None, val_date=None, hist=None, fa=None, kind="CB"):
+def _reg_alerts(add, issue, issues, f, items, vd):
+    """발행결정 정정·납입·리픽싱 하한·상향 의무·Call 행사자·전환 제한 등 규정 대조.
+    규정: 증권의 발행 및 공시 등에 관한 규정 (2021.12 사모 CB 상향조정 의무·최대주주 Call 지분율 한도,
+    2024.12.1 리픽싱 70% 예외는 건별 주총 특별결의만·Call 행사자 지정 공시·만기전 취득 공시·사모 전환가 산정 기준일 명확화)."""
+    rc0, tm = issue["rcept_no"], (issue.get("bd_tm") or "").lstrip("0")
+    bddd = kdate(issue.get("bddd")) or _iso(rc0[:8])
+    since = (dt.date.fromisoformat(bddd) - dt.timedelta(days=365)).isoformat()
+    disc = lambda d: {"rcept_no": d["rcept_no"], "date": _iso(d["rcept_dt"]), "report_nm": d["report_nm"].strip()}
+
+    same = [x for x in issues if x["kind"] == issue["kind"] and (x.get("bd_tm") or "").lstrip("0") == tm]
+    newer = [x for x in same if x["rcept_no"] > rc0]
+    as_item = lambda xs: [{"rcept_no": x["rcept_no"], "date": kdate(x.get("bddd")) or _iso(x["rcept_no"][:8]),
+                           "report_nm": f"{x['kind']} 발행결정 (제{x['bd_tm']}회) 접수 {_iso(x['rcept_no'][:8])}"} for x in xs]
+    if newer:
+        add("bad", f"같은 회차의 더 최신 발행결정 공시 {len(newer)}건 (정정본)",
+            "지금 불러온 공시보다 뒤에 접수된 같은 회차 발행결정이 있습니다. 평가보고서가 최신 정정 조건(전환가·Put·Call·리픽싱)을 썼는지 확인하고, 회차 목록에서 최신 공시를 불러오세요.",
+            as_item(newer), "규제")
+    elif len(same) > 1:
+        add("info", f"같은 회차 발행결정 {len(same)}건 — 최신 정정본 기준으로 불러옴",
+            "정정 전 조건이 평가보고서에 남아 있지 않은지 확인하세요.", as_item(same), "규제")
+    corr = [d for d in items if re.search(r"정정", d["report_nm"]) and re.search(r"사채권?\s*발행\s*결정", d["report_nm"])
+            and _iso(d["rcept_dt"]) >= bddd]
+    if corr and not newer:
+        add("info", f"발행결정 [정정] 공시 {len(corr)}건 (결의일 이후)",
+            "어느 회차의 정정인지 원문에서 확인하세요. 평가 대상 회차라면 정정 후 조건으로 평가했는지 봐야 합니다.", [disc(d) for d in corr[:6]], "규제")
+
+    bad_pay = [d for d in items if _iso(d["rcept_dt"]) >= bddd
+               and re.search(r"철회|발행\s*(?:취소|중단)|납입\s*(?:지연|연기|일\s*변경)|미납", d["report_nm"])]
+    if bad_pay:
+        add("bad", f"발행 철회·납입 지연/변경 공시 {len(bad_pay)}건",
+            "실제로 납입(발행)됐는지, 납입일이 바뀌었는지 확인하세요. 미납·철회된 사채를 평가하거나 바뀐 납입일(=발행일·Put/Call 기산일)을 놓친 경우가 있습니다.",
+            [disc(d) for d in bad_pay[:6]], "규제")
+
+    private = f.get("사모여부") == "사모"
+    fp, flo = f.get("최초전환가격"), f.get("Refix최소")
+    if f.get("상하향조정") in ("하", "상하", "상향") and fp and flo and flo < fp * 0.7 - 0.5:
+        agm = [d for d in items if re.search(r"주주총회", d["report_nm"]) and since <= _iso(d["rcept_dt"]) <= bddd]
+        add("bad" if not agm else "warn", f"리픽싱 하한 {flo / fp:.0%} — 최초 전환가의 70% 미만",
+            "규정상 하향 한도는 최초 전환가의 70%이고, 예외는 주주총회 특별결의가 있어야 합니다 (2024.12.1부터 정관 근거 삭제, 건별 특별결의만). "
+            + ("결의일 전 1년 안의 주주총회 공시를 확인하세요." if agm else "결의일 전 1년 안에 주주총회 공시가 보이지 않습니다. 근거를 확인하세요."),
+            [disc(d) for d in agm[:5]], "규제")
+    if private and f.get("상하향조정") == "하" and bddd >= "2021-12-01":
+        add("warn", "사모 CB인데 상향 조정 조항을 찾지 못함",
+            "2021.12 이후 하향 리픽싱이 있는 사모 CB는 주가 상승 시 최초 전환가까지 상향 조정이 의무입니다. 원문의 상향 조항을 확인해 있으면 '상하'로 바꿔 평가하고, "
+            "없으면 규정 위반 가능성을 감사팀에 알리세요. 평가보고서가 상향을 반영했는지도 보세요.", cat="규제")
+
+    callx = [d for d in items if _iso(d["rcept_dt"]) >= bddd and re.search(r"매수선택권|콜옵션|매도청구권", d["report_nm"])]
+    if callx:
+        add("warn", f"Call(매도청구권) 행사자 지정·양도·행사 공시 {len(callx)}건",
+            "행사자가 바뀌었거나 일부 행사됐으면 평가보고서의 Call 한도·잔액이 맞는지 확인하세요 (2024.12부터 행사자 지정 공시 의무).",
+            [disc(d) for d in callx[:6]], "규제")
+    if f.get("Call초일"):
+        try:
+            _, calls = sections(plain(rc0))
+            cs = " ".join(calls)
+        except Exception:
+            cs = ""
+        m = re.search(r"[^.]{0,40}(?:최대주주|특수관계인)[^.]{0,40}", cs)
+        if m:
+            add("warn", "최대주주 등이 Call 행사 가능 (발행 당시 지분율 한도 조항)",
+                f"규정상 최대주주·특수관계인의 Call 행사는 발행 당시 지분율 이내입니다 (2021.12~). 평가의 Call 한도({f.get('Call한도') or 0:.0%})가 "
+                f"실제 행사 가능 물량과 맞는지, 특수관계자 거래로 공시·회계 처리됐는지 확인하세요. 원문: “{m.group(0).strip()[:90]}”", cat="규제")
+
+    iss = f.get("발행일")
+    if private and issue["kind"] == "CB" and iss and f.get("전환초일") and f["전환초일"] < add_months(iss, 12):
+        add("warn", f"사모 CB 전환 시작일이 발행 후 1년 이내 ({f['전환초일']})",
+            "사모 CB는 발행 후 1년이 지나야 전환할 수 있습니다. 공시 오류인지, 평가에 1년 이전 전환을 허용했는지 확인하세요.", cat="규제")
+    if private and bddd >= "2024-12-01":
+        add("info", "사모 CB 최초 전환가 산정 기준",
+            "2024.12부터 실제 납입일 전 제3거래일 가중평균주가 등을 반영하도록 명확화됐습니다. 납입일이 바뀐 경우 전환가를 다시 산정했는지 확인하세요.", cat="규제")
+
+
+def alerts(corp_code, fields=None, items=None, val_date=None, hist=None, fa=None, kind="CB", issue=None, issues=None):
     items = items if items is not None else disclosures(corp_code)
     vd = val_date or dt.date.today().isoformat()
     f = {k: (v or {}).get("value") for k, v in (fields or {}).items()}
@@ -894,6 +966,9 @@ def alerts(corp_code, fields=None, items=None, val_date=None, hist=None, fa=None
     if kind == "BW":
         add("warn", "신주인수권부사채(BW)", "대시보드 계산은 전환사채(비분리형) 방식입니다. 분리형이면 사채와 신주인수권을 따로 평가하세요.", cat="조건")
 
+    if issue:
+        _reg_alerts(add, issue, issues or [], f, items, vd)
+
     if fa and fa.get("acc"):
         a = fa["acc"]
         g = lambda k, i=0: (a.get(k) or (None, None, None))[i]
@@ -924,5 +999,5 @@ def alerts(corp_code, fields=None, items=None, val_date=None, hist=None, fa=None
     else:
         summary = None
     order = {"bad": 0, "warn": 1, "info": 2}
-    out.sort(key=lambda x: (order[x["level"]], {"회차": 0, "재무": 1, "감사": 1, "조건": 2, "공시": 3}.get(x["cat"], 4)))
+    out.sort(key=lambda x: (order[x["level"]], {"회차": 0, "규제": 1, "재무": 2, "감사": 2, "조건": 3, "공시": 4}.get(x["cat"], 5)))
     return out, summary

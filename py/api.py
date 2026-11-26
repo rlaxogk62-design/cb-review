@@ -44,7 +44,7 @@ def load_issue(corp_code, rcept_no, val_date=None):
         fa = dart.fin_audit(corp_code, val_date)
     except Exception as ex:
         fa, _ = {}, warnings.append(f"재무·감사 정보를 읽지 못했습니다: {ex}")
-    al, summary = dart.alerts(corp_code, fields, items, val_date, hist, fa, it["kind"])
+    al, summary = dart.alerts(corp_code, fields, items, val_date, hist, fa, it["kind"], issue=it, issues=issues)
     vd = val_date or dt.date.today().isoformat()
     for a in acts:
         when = a["listing"] or a["effective"] or a["board"]

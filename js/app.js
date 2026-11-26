@@ -139,7 +139,8 @@ async function loadIssue(it, keepManual = false) {
     st.result = null;
     $('#work').classList.remove('hidden');
     $('#resultCard').classList.add('hidden');
-    renderFields(); renderAlerts(); renderReport();
+    if (!keepManual) st.assume = {};
+    renderFields(); renderAlerts(); renderReport(); renderAssume();
     if (!keepManual) $('#placement').value = (st.fields['사모여부'] || {}).value === '공모' ? '0' : '1';
     await showDoc(it.rcept_no);
     $('#docTitle').textContent = `${st.corp.corp_name} ${it.kind} 제${it.bd_tm}회 발행결정 원문`;
@@ -299,6 +300,7 @@ function renderFields() {
 
 function markStale() {
   if (st.result) { $('#resTable').classList.add('stale'); $('#resInfo').textContent = '입력이 바뀌었습니다. [평가 계산]을 다시 누르세요.'; }
+  renderAssume();
 }
 
 /* ------------------------------------------------------------ 4. 원문과 형광펜 */
@@ -475,6 +477,79 @@ function renderReport() {
     g.appendChild(l);
   });
 }
+/* ------------------------------------------------------------ 평가보고서 가정 ↔ 공시 대조
+ * [키, 화면 이름, 형식, 대시보드 값 가져오기]  형식: money(원, 0.5% 이내 일치) · pct(%p, 0.01%p 이내) · date · sel:… · text */
+const fv = (k) => (st.fields[k] || {}).value;
+const ASSUME = [
+  ['잔여총액', '잔여총액(원)', 'money', () => fv('잔여총액')],
+  ['현조정행사가격', '현 전환가(원)', 'money', () => fv('현조정행사가격')],
+  ['최초전환가격', '최초 전환가(원)', 'money', () => fv('최초전환가격')],
+  ['만기일', '만기일', 'date', () => fv('만기일')],
+  ['표면이자율', '표면이자율(%)', 'pct', () => fv('표면이자율')],
+  ['만기이자율', '만기보장수익률(%)', 'pct', () => fv('만기이자율')],
+  ['Put반영', 'Put 반영', 'sel:Y|N', () => (fv('Put초일') ? 'Y' : 'N')],
+  ['YTP', '조기상환수익률(%)', 'pct', () => fv('YTP')],
+  ['Call반영', 'Call 반영', 'sel:Y|N', () => (fv('Call초일') ? 'Y' : 'N')],
+  ['Call한도', 'Call 한도(%)', 'pct', () => fv('Call한도')],
+  ['상하향조정', '리픽싱', 'sel:일반|하|상하', () => fv('상하향조정')],
+  ['Refix최소', '리픽싱 하한(원)', 'money', () => fv('Refix최소')],
+  ['주가', '평가기준일 주가(원)', 'money', () => num($('#S').value)],
+  ['변동성', '변동성(%)', 'pct', () => num($('#sigma').value)],
+  ['등급', '할인율 곡선 등급', 'text', () => $('#credit_grade').value || null],
+];
+st.assume = st.assume || {};
+function assumeShow(type, v) {
+  if (v == null || v === '') return '';
+  if (type === 'pct') return (Number(v) * 100).toFixed(4).replace(/\.?0+$/, '') + '%';
+  if (type === 'money') return fmt(v, Number.isInteger(Number(v)) ? 0 : 2);
+  return String(v);
+}
+function assumeJudge(type, ours, theirs) {
+  if (theirs == null || theirs === '') return { mark: '', diff: '' };
+  if (ours == null || ours === '') return { mark: '?', diff: '대시보드 값 없음' };
+  if (type === 'money') {
+    const d = theirs - ours, r = ours ? Math.abs(d / ours) : Math.abs(d);
+    return r <= 0.005 ? { mark: '✓', diff: '' } : { mark: '✗', diff: `${d > 0 ? '+' : ''}${fmt(d)} (${(d / (ours || 1) * 100).toFixed(1)}%)` };
+  }
+  if (type === 'pct') {
+    const d = theirs - ours;
+    return Math.abs(d) <= 0.0001 ? { mark: '✓', diff: '' } : { mark: '✗', diff: `${d > 0 ? '+' : ''}${(d * 100).toFixed(2)}%p` };
+  }
+  return String(ours).trim() === String(theirs).trim() ? { mark: '✓', diff: '' } : { mark: '✗', diff: '다름' };
+}
+function assumeRows() {
+  return ASSUME.map(([k, label, type, get]) => {
+    const ours = get(), theirs = st.assume[k];
+    return { k, label, type, ours, theirs, ...assumeJudge(type, ours, theirs) };
+  });
+}
+function renderAssume() {
+  const t = $('#assumeTable');
+  if (!t || !st.issue) return;
+  const rows = assumeRows();
+  t.innerHTML = '<tr><th>항목</th><th>공시·대시보드</th><th>평가보고서</th><th>판정</th></tr>' + rows.map((r) => {
+    let input;
+    const cur = r.theirs == null ? '' : (r.type === 'pct' ? +(r.theirs * 100).toFixed(6) : r.type === 'money' ? fmt(r.theirs, 2).replace(/\.00$/, '') : r.theirs);
+    if (r.type.startsWith('sel:')) input = `<select data-as="${r.k}">${['', ...r.type.slice(4).split('|')].map((o) => `<option ${o === (r.theirs || '') ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+    else input = `<input data-as="${r.k}" type="${r.type === 'date' ? 'date' : 'text'}" value="${esc(cur)}" placeholder="${r.type === 'pct' ? '%' : ''}">`;
+    const cls = r.mark === '✗' ? 'big' : '';
+    return `<tr><td>${esc(r.label)}</td><td>${esc(assumeShow(r.type, r.ours))}</td><td>${input}</td><td class="${cls}">${r.mark} ${esc(r.diff)}</td></tr>`;
+  }).join('');
+  t.querySelectorAll('[data-as]').forEach((el) => el.addEventListener('change', () => {
+    const k = el.dataset.as, type = ASSUME.find((a) => a[0] === k)[2];
+    const v = el.value.trim();
+    st.assume[k] = v === '' ? null : type === 'pct' ? num(v) / 100 : type === 'money' ? num(v) : v;
+    renderAssume();
+  }));
+  const bad = rows.filter((r) => r.mark === '✗').length, done = rows.filter((r) => r.mark).length;
+  $('#assumeCount').textContent = done ? `${done}개 비교 · 불일치 ${bad}개` : '';
+  $('#assumeCount').className = 'muted' + (bad ? ' warnc' : '');
+}
+function assumePayload() {
+  return assumeRows().filter((r) => r.theirs != null && r.theirs !== '')
+    .map((r) => ({ 항목: r.label, 공시: assumeShow(r.type, r.ours), 평가보고서: assumeShow(r.type, r.theirs), 판정: r.mark, 차이: r.diff }));
+}
+
 function report() {
   const o = {};
   document.querySelectorAll('[data-rep]').forEach((i) => { const v = num(i.value); if (v != null) o[i.dataset.rep] = v; });
@@ -543,6 +618,7 @@ function payload() {
       source: (st.market.source || '수동 입력') + (st.market.volMethod && st.market.source !== '수동 입력' ? ` · 변동성 ${st.market.volMethod}` : '') },
     curves: { rf: curve('#rf'), rd: curve('#rd') },
     report: report(),
+    assume: assumePayload(),
     result: st.result ? st.result.result : null,
     alerts: st.alerts,
     conclusion: $('#conclusion').value,
@@ -633,7 +709,7 @@ window.addEventListener('DOMContentLoaded', () => {
   $('#val_date').addEventListener('change', () => { if (st.issue) loadIssue(st.issue, true); });
   $('#btnCurves').onclick = async () => { st.gradeManual = false; await loadCredit(); await loadCurves(); };
   $('#placement').addEventListener('change', async () => { st.gradeManual = false; await loadCredit(); await loadCurves(); });
-  $('#credit_grade').addEventListener('change', () => { st.gradeManual = true; loadCurves(); });
+  $('#credit_grade').addEventListener('change', () => { st.gradeManual = true; loadCurves(); renderAssume(); });
   ['#period', '#window'].forEach((id) => $(id).addEventListener('change', loadMarket));
   $('#volMethod').addEventListener('change', () => { applyVolMethod(); markStale(); localStorage.setItem('volMethod', $('#volMethod').value); });
   if (localStorage.getItem('volMethod')) $('#volMethod').value = localStorage.getItem('volMethod');

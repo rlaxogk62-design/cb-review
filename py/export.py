@@ -131,6 +131,25 @@ def review_xlsx(st):
     for k in ("S", "sigma"):
         ev.cell(r, 1, {"S": "주가", "sigma": "변동성"}[k]); ev.cell(r, 2, st["market"].get(k))
         ev.cell(r, 3, st["market"].get("source") or "수동"); r += 1
+
+    rows = st.get("assume") or []
+    if rows:
+        ws3 = wb.create_sheet("가정 대조")
+        ws3["A1"] = "평가보고서 가정 ↔ 공시·대시보드 대조 (✓ 일치 · ✗ 불일치 — 금액 0.5%, 이율 0.01%p 넘게 차이)"
+        ws3["A1"].font = Font(bold=True, color=NAVY)
+        heads = ["항목", "공시·대시보드", "평가보고서", "판정", "차이", "검토 의견"]
+        for ci, h in enumerate(heads, 1):
+            c = ws3.cell(3, ci, h); c.fill = HEAD; c.font = Font(bold=True); c.border = BOX
+        bad = PatternFill("solid", fgColor="F6E1DF")
+        for ri, a in enumerate(rows, 4):
+            vals = [a.get("항목"), a.get("공시"), a.get("평가보고서"), a.get("판정"), a.get("차이"),
+                    "평가사에 근거 확인 필요" if a.get("판정") == "✗" else ""]
+            for ci, v in enumerate(vals, 1):
+                c = ws3.cell(ri, ci, v); c.border = BOX
+                if a.get("판정") == "✗":
+                    c.fill = bad
+        for col, w in zip("ABCDEF", (22, 20, 20, 8, 24, 28)):
+            ws3.column_dimensions[col].width = w
     bio = io.BytesIO()
     wb.save(bio)
     return bio.getvalue()
