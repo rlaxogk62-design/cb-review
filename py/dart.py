@@ -431,7 +431,8 @@ def parse_cb(raw, kind="CB"):
         if mf:
             put("Call연회수", round(12 / int(mf.group(1)), 4), ev(rc, "Call Option", mf.group(0)))
         elif len(ctab) > 1:
-            put("Call연회수", round(12 / round(months_between(ctab[0][0], ctab[1][0])), 4), None, conf="mid")
+            put("Call연회수", round(12 / round(months_between(ctab[0][0], ctab[1][0])), 4), None,
+                note=f"일정표 간격 {round(months_between(ctab[0][0], ctab[1][0]))}개월로 계산", conf="mid")
         else:
             put("Call연회수", 12, None, note="주기 표시 없음 → 12 (Temp 기준)", conf="low")
         t = rate_text(re.sub(r"\d+\s*차\s+.*?%", " ", cs))
@@ -456,12 +457,18 @@ def parse_cb(raw, kind="CB"):
         else:
             put("Call한도", 1.0, None, note="한도 비율 표시 없음 → 100% (Temp 기준)", conf="low")
         third = re.search(r"발행회사가\s*지정하는\s*(?:자|제3자)", cs)
-        put("Call3자배정", "Y" if third else "N", ev(rc, "매도청구권", third.group(0)) if third else None)
-        put("Call순위", "후순위" if re.search(r"후순위", cs) else "선순위", None,
-            note=None if re.search(r"후순위", cs) else '"후순위" 표현 없음 → 선순위 (Temp 기준)')
+        if third:
+            put("Call3자배정", "Y", ev(rc, "매도청구권", third.group(0)))
+        else:
+            put("Call3자배정", "N", None, note='"발행회사가 지정하는 자" 문구 없음 → N (추정)', conf="mid")
+        sub = re.search(r"[^.。\n]{0,40}후순위[^.。\n]{0,20}", cs)
+        if sub:
+            put("Call순위", "후순위", ev(rc, "매도청구권", sub.group(0).strip()))
+        else:
+            put("Call순위", "선순위", None, note='"후순위" 표현 없음 → 선순위 (Temp 기준, 추정)', conf="mid")
     else:
-        put("Call초일", None, None, note="매도청구권(Call) 조항이 없습니다.", conf="high")
-        put("Call한도", 0, None, conf="high")
+        put("Call초일", None, None, note="매도청구권(Call) 조항을 찾지 못했습니다 → Call 없음으로 둡니다. 원문을 확인하세요.", conf="mid")
+        put("Call한도", 0, None, note="Call 조항 없음 → 0", conf="mid")
 
     floor_api = raw.get("act_mktprcfl_cvprc_lwtrsprc")
     floor_doc = re.search(r"최저\s*조정\s*가액\s*\(원\)\s*([\d,]{2,})", p)

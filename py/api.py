@@ -57,6 +57,10 @@ def load_issue(corp_code, rcept_no, val_date=None):
             al.insert(0, {"level": "warn", "cat": "회차", "title": f"{txt} — 평가기준일 이후",
                           "why": f"야후·RAS 주가는 이 사건으로 소급조정돼 있어 평가기준일 주가를 {a['factor']:g}로 나눠 당시 실제 주가로 바꿉니다 (Temp 메모: KRX 수정전 주가). 변동성은 영향 없습니다.",
                           "items": [{"rcept_no": a["rcept_no"], "date": a["board"], "report_nm": a["report_nm"]}]})
+    for f in fields.values():
+        if f.get("conf") == "high" and not any(e and e.get("rcept_no") for e in (f.get("evidence") or [])):
+            f["conf"] = "mid"
+            f["note"] = f.get("note") or "원문 근거 문구 없이 규칙·기본값으로 정한 값입니다. 원문을 확인하세요."
     return {"issue": {k: v for k, v in it.items() if k != "raw"}, "fields": fields, "alerts": al, "summary": summary,
             "history": hist, "warnings": warnings, "actions": acts,
             "disclosures": [{"rcept_no": d["rcept_no"], "date": d["rcept_dt"], "report_nm": d["report_nm"].strip()} for d in items[:300]]}
