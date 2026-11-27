@@ -176,3 +176,4 @@ table.sctable td.up { color: var(--good); font-weight: 700; } table.sctable td.d
 table.sctable td.st { color: var(--muted); font-family: var(--sans); white-space: normal; min-width: 120px; }
 table.sctable td.nt { color: var(--muted); font-family: var(--sans); white-space: normal; min-width: 200px; font-size: 11px; text-align: left; }
 @media (max-width: 1100px) { .grid4 { grid-template-columns: 1fr 1fr; } }
+label.check.inline2 { grid-column: auto; } label.check.inline2 input { width: auto; }

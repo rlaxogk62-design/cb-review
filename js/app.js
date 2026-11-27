@@ -292,8 +292,16 @@ function scDerive(r) {
   r.par = r.parity != null ? r.parity : r.issue_parity;
   r.opt_pct = [r.conv_pct, r.put_pct, r.call_pct].some((x) => x != null) ? (r.conv_pct || 0) + (r.put_pct || 0) + (r.call_pct || 0) : null;
   r.spread_gap = r.implied_spread != null && r.grade_spread != null ? r.implied_spread - r.grade_spread : null;
+  // 이상치: 주가 시계열 단절(병합·감자·거래정지)이나 조건 파싱 오류가 의심되는 값 — 순위를 왜곡하므로 기본으로 뺀다
+  const why = [];
+  if (r.sigma != null && r.sigma > 1.5) why.push(`변동성 ${(r.sigma * 100).toFixed(0)}%`);
+  if (r.par != null && (r.par > 300 || r.par < 10)) why.push(`패리티 ${r.par.toFixed(0)}`);
+  if (r.issue_value_pct != null && r.issue_value_pct > 300) why.push(`발행시점 이론가치 ${r.issue_value_pct.toFixed(0)}`);
+  r.outlier = why.length ? why.join('·') : '';
+  if (r.outlier) r.notes = [`⚠ 이상치 확인 (${r.outlier}) — 주가 시계열 병합·감자·거래정지 또는 전환가 파싱 확인`, ...(r.notes || [])];
   r.note = (r.notes || []).join(' / ') + (r.grade_src ? (r.notes && r.notes.length ? ' / ' : '') + r.grade_src : '');
   if (r.status === 'ok') r.status = '';
+  if (r.outlier && !r.status) r.status = '이상치 확인';
   return r;
 }
 function scCell(r, [k, , t]) {
@@ -319,7 +327,9 @@ function scCell(r, [k, , t]) {
 function scRender() {
   const flt = $('#scFilter').value.trim();
   const only = $('#scOnlyOk').checked;
-  let rows = sc.rows.filter((r) => (!only || !r.status || r.status === '발행 예정') && (!flt || (r.corp_name || '').includes(flt)));
+  const noOut = $('#scNoOutlier').checked;
+  let rows = sc.rows.filter((r) => (!only || !r.status || r.status === '발행 예정' || r.status === '이상치 확인')
+    && (!noOut || !r.outlier) && (!flt || (r.corp_name || '').includes(flt)));
   const { key, dir } = sc.sort;
   rows = rows.slice().sort((a, b) => {
     const x = a[key], y = b[key];
@@ -348,6 +358,7 @@ function scInit() {
   $('#scCsv').onclick = scCsv;
   $('#scFilter').addEventListener('input', scRender);
   $('#scOnlyOk').addEventListener('change', scRender);
+  $('#scNoOutlier').addEventListener('change', scRender);
   $('#scTable').addEventListener('click', (e) => {
     const th = e.target.closest('th');
     if (th) { const k = th.dataset.k; sc.sort = { key: k, dir: sc.sort.key === k ? -sc.sort.dir : (['corp_name', 'tm', 'status', 'grade', 'note', 'private', 'refix'].includes(k) ? 1 : -1) }; scRender(); return; }
