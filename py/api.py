@@ -474,15 +474,88 @@ def implied_for(st):
     return out
 
 
+def book_check(st):
+    """장부 대조: 정기보고서 주석의 파생상품부채(공정가치)·사채 장부금액·평가 가정을 읽고,
+    같은 보고기간 말 시장자료로 대시보드가 다시 계산한 값과 비교한다."""
+    m = st["meta"]
+    v = {k: (x or {}).get("value") for k, x in st["fields"].items()}
+    kind = m.get("kind") or "CB"
+    items = dart.disclosures(m["corp_code"])
+    rep = notes.pick_report(items, m["val_date"])
+    if not rep:
+        raise ValueError("평가기준일 이전 정기보고서가 없습니다.")
+    per = rep["period"]
+    if v.get("발행일") and v["발행일"] > per:
+        return {"report": rep, "period": per, "book": None, "why": f"{rep['report_nm']} 기준일({per}) 뒤에 발행된 회차라 장부 값이 아직 없습니다."}
+    bk = notes.book_values(rep["rcept_no"], kind, v.get("회차") or m.get("bd_tm"), v.get("발행총액"))
+    out = {"report": rep, "period": per, "book": bk, "notes": []}
+    if m.get("stock_code"):
+        mk = market.stock(m["stock_code"], per, m.get("market"), ras=ras)
+        S, sig, msrc = mk["price"], mk["vol"], f"{mk['price_date']} 주가 {mk['price']:,.0f}원 · 변동성 {mk['vol']:.1%}"
+    else:
+        S, sig, msrc = st["market"].get("S"), st["market"].get("sigma"), "비상장 — 화면의 주가·변동성 사용"
+    grade = m.get("credit_grade") or None
+    if ras is not None and grade:
+        c = ras.curves(per, grade)
+        rf, rd, csrc = c["rf"], c["rd"], f"{c['rf_date']} 국고채 · {grade}"
+    else:
+        rf, rd, csrc = _flat(st["curves"]["rf"]), _flat(st["curves"]["rd"]), "화면의 Rf·Rd 곡선 (평가기준일 기준)"
+        if per != m["val_date"]:
+            out["notes"].append("곡선은 보고기간 말이 아니라 화면 값입니다 (외부 웹 또는 등급코드 없음).")
+    if per != m["val_date"]:
+        out["notes"].append(f"잔액·전환가는 평가기준일({m['val_date']}) 기준 값입니다 — 그 사이 전환·리픽싱이 있으면 차이가 날 수 있습니다.")
+    st2 = {"meta": dict(m, val_date=per), "fields": st["fields"], "market": {"S": S, "sigma": sig}, "curves": {"rf": rf, "rd": rd}}
+    res = engine.value(engine_params(st2))["result"]
+    out.update({"market": msrc, "curves": csrc, "S": S, "sigma": sig,
+                "calc_total": res.get("전체가치"), "calc_bond": res.get("일반사채"),
+                "calc_deriv": (res.get("전체가치") or 0) - (res.get("일반사채") or 0)})
+    if kind in ("RCPS", "CPS"):
+        out["calc_compare"] = out["calc_total"]
+        out["compare_label"] = "종류주식 부채 (전체 공정가치)"
+    else:
+        out["calc_compare"] = out["calc_deriv"]
+        out["compare_label"] = "파생상품부채 (전체가치 − 일반사채)"
+    b = bk.get("derivative")
+    if b is not None and out["calc_compare"] is not None and b:
+        out["gap"] = out["calc_compare"] - b
+        out["gap_pct"] = out["gap"] / abs(b)
+        if kind not in ("RCPS", "CPS") and abs(out["gap_pct"]) > 0.05:
+            out["book_spread"] = _book_spread(st2, rf, b)
+    return out
+
+
+def _book_spread(st2, rf, target):
+    """장부 파생상품부채(전체 − 일반사채)를 맞추는 Rd − Rf. 파생 = 전체 − 일반사채는 스프레드가 클수록 커진다."""
+    def deriv(s):
+        st3 = dict(st2, curves={"rf": rf, "rd": screen.rd_from_spread(rf, s)})
+        r = engine.value(engine_params(st3))["result"]
+        return (r.get("전체가치") or 0) - (r.get("일반사채") or 0)
+    lo, hi = 0.0, 0.6
+    flo, fhi = deriv(lo) - target, deriv(hi) - target
+    if flo * fhi > 0:
+        return None
+    for _ in range(30):
+        mid = (lo + hi) / 2
+        fm = deriv(mid) - target
+        if abs(fm) <= abs(target) * 1e-3 or hi - lo < 1e-4:
+            return mid * 100
+        if (fm > 0) == (fhi > 0):
+            hi, fhi = mid, fm
+        else:
+            lo, flo = mid, fm
+    return (lo + hi) / 2 * 100
+
+
 def screen_corp(body):
     """딜 스크리닝: 회사 하나의 기간 안 발행 회차 평가 (화면이 회사별로 차례로 부른다)."""
     cv = screen.Curves(ras, _flat(body.get("rf") or []) or None, _flat(body.get("rd") or []) or None) if ras is None \
         else screen.Curves(ras)
     key = ("screen", body["corp"]["corp_code"], body["val_date"], body["since"], tuple(body.get("kinds") or ()),
-           json.dumps(body.get("credit") or {}, sort_keys=True), bool(body.get("at_issue")),
+           json.dumps(body.get("credit") or {}, sort_keys=True), bool(body.get("at_issue")), bool(body.get("book")),
            json.dumps([body.get("rf"), body.get("rd")]) if ras is None else "")
     return screen._memo(key, lambda: screen.value_corp(body["corp"], body["val_date"], body["since"], tuple(body.get("kinds") or ("CB", "BW", "EB")),
-                                                       body.get("credit"), cv, bool(body.get("at_issue")), ras), ttl=1800)
+                                                       body.get("credit"), cv, bool(body.get("at_issue")), ras,
+                                                       bool(body.get("book"))), ttl=1800)
 
 
 def route(method, path, query="", body=None):
@@ -536,6 +609,8 @@ def route(method, path, query="", body=None):
             return 200, dart.latest(q["corp_code"], int(q.get("days", 45))), JSON, None
     if method == "POST":
         st = json.loads(body or "{}")
+        if path == "/api/bookcheck":
+            return 200, book_check(st), JSON, None
         if path == "/api/implied":
             return 200, implied_for(st), JSON, None
         if path == "/api/screen/corp":

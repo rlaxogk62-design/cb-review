@@ -266,6 +266,39 @@ async function doImplied() {
   } catch (e) { box.innerHTML = `<span class="warnc">${esc(e.message)}</span>`; }
 }
 
+/* ------------------------------------------------------------ 장부 대조 */
+const eok = (x) => (x == null ? '-' : `${(x / 1e8).toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}억`);
+async function doBook() {
+  const box = $('#bookBox');
+  box.innerHTML = '<span class="muted">정기보고서 주석을 읽고 보고기간 말 주가·변동성·곡선으로 다시 계산하는 중…</span>';
+  try {
+    const r = await api('/api/bookcheck', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload()) });
+    $('#bookTag').textContent = r.report ? `${r.report.report_nm} · 기준일 ${r.period}` : '';
+    if (!r.book) { box.innerHTML = `<div class="warnc">${esc(r.why || '장부 값을 찾지 못했습니다.')}</div>`; return; }
+    const b = r.book, a = b.assume || {};
+    let h = '';
+    if (b.derivative == null) {
+      h += `<div class="warnc">이 회차의 장부 금액을 주석에서 찾지 못했습니다.${b.total_derivative != null
+        ? ` 파생상품부채는 회차 구분 없이 합계 ${eok(b.total_derivative)}만 공시됐습니다 (공시된 회차 ${(b.series_seen || []).join('·')}회).` : ''}</div>`;
+    } else {
+      const g = r.gap_pct;
+      h += `<table class="res"><tr><th>구분</th><th>장부 (주석)</th><th>재계산</th><th>차이</th><th>차이율</th></tr>
+        <tr class="total"><td>${esc(r.compare_label)}</td><td>${eok(b.derivative)}</td><td>${eok(r.calc_compare)}</td>
+          <td>${eok(r.gap)}</td><td class="${g != null && Math.abs(g) > 0.1 ? 'big' : ''}">${g == null ? '' : (g * 100).toFixed(1) + '%'}</td></tr>
+        ${b.bond_book != null ? `<tr><td>사채 장부금액 (상각후원가 · 참고)</td><td>${eok(b.bond_book)}</td><td>${eok(r.calc_bond)}</td><td colspan="2" class="muted">재계산은 일반사채 공정가치</td></tr>` : ''}
+        </table><div class="muted">출처: ${esc(b.src || '')}${b.scope ? ' · ' + esc(b.scope) : ''}${b.model ? ' · 회사 모형 ' + esc(b.model) : ''}</div>`;
+      if (r.book_spread != null) h += `<div>장부 파생상품부채를 맞추는 할인율 ≈ Rf + ${r.book_spread.toFixed(2)}%p (지금 곡선 ${esc($('#credit_grade').value || '입력값')})</div>`;
+      else if (g != null && Math.abs(g) > 0.05) h += '<div class="warnc">할인율만으로는 장부 값을 맞출 수 없습니다 (Rf+0~60%p). 전환가·Put·Call·리픽싱 조건 차이부터 확인하세요.</div>';
+    }
+    const rows = [['주가', a['주가'], r.S != null ? `${fmt(r.S)}원` : ''], ['변동성', a['변동성'], r.sigma != null ? `${(r.sigma * 100).toFixed(1)}%` : ''],
+      ['무위험이자율', a['무위험'], '국고채 곡선'], ['할인율(위험)', a['할인율'], esc($('#credit_grade').value || '입력 곡선')], ['전환가', a['전환가'], fmt((st.fields['현조정행사가격'] || {}).value)]]
+      .filter(([, x]) => x);
+    if (rows.length) h += `<table class="res"><tr><th>평가 가정</th><th>주석 (회사)</th><th>대시보드 (${esc(r.period)})</th></tr>${rows.map(([k, x, y]) => `<tr><td>${k}</td><td>${esc(x)}</td><td>${esc(y)}</td></tr>`).join('')}</table>`;
+    h += `<div class="muted">${esc(r.market || '')} · ${esc(r.curves || '')}${(r.notes || []).map((n) => ' · ' + esc(n)).join('')}</div>`;
+    box.innerHTML = h;
+  } catch (e) { box.innerHTML = `<div class="warnc">${esc(e.message)}</div>`; }
+}
+
 /* ------------------------------------------------------------ 탭 */
 function showTab(name) {
   document.querySelectorAll('#tabs .tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
@@ -285,7 +318,8 @@ const SC_COLS = [
   ['ytm', 'YTM', 'r'], ['ytp', 'YTP', 'r'], ['refix', '리픽싱', 'l'], ['call_ratio', 'Call', 'r0'], ['grade', '신용 가정', 'l'],
   ['value_pct', '이론가치', 'p1'], ['bond_pct', '일반사채', 'p1'], ['opt_pct', '옵션', 'p1'],
   ['issue_value_pct', '발행시점 이론가치', 'up'], ['implied_spread', '내재 스프레드', 'sp'], ['grade_spread', '등급 스프레드', 'sp'],
-  ['spread_gap', '차이', 'gap'], ['note', '비고', 'nt'],
+  ['spread_gap', '차이', 'gap'], ['book_deriv', '장부 파생', 'eok1'], ['calc_deriv', '재계산 파생', 'eok1'], ['book_gap', '장부 차이', 'bg'],
+  ['note', '비고', 'nt'],
 ];
 function scDerive(r) {
   r.tm = `${r.kind || ''} ${r.kind === 'RCPS' || r.kind === 'CPS' ? (r.bd_tm || '') : (r.bd_tm ? r.bd_tm + '회' : '')}`;
@@ -313,6 +347,8 @@ function scCell(r, [k, , t]) {
     case 'nt': return `<td class="nt">${esc(v || '')}</td>`;
     case 'd': return `<td>${esc(v || '')}</td>`;
     case 'eok': return `<td>${v == null ? '' : n(v / 1e8, 0)}</td>`;
+    case 'eok1': return `<td>${v == null ? '' : n(v / 1e8, 1)}</td>`;
+    case 'bg': return `<td class="${v == null ? '' : Math.abs(v) > 20 ? 'dn' : 'up'}">${v == null ? '' : (v > 0 ? '+' : '') + n(v, 1) + '%'}</td>`;
     case 'n0': return `<td>${n(v, 0)}</td>`;
     case 'p1': return `<td>${n(v, 1)}</td>`;
     case 'v': return `<td>${v == null ? '' : n(v * 100, 1) + '%'}</td>`;
@@ -375,7 +411,7 @@ async function scRun() {
   if (!vd || !kinds.length) { toast('평가기준일과 상품을 고르세요.', true); return; }
   const since = new Date(vd); since.setMonth(since.getMonth() - Number($('#scMonths').value));
   const sinceS = since.toISOString().slice(0, 10);
-  const base = { val_date: vd, since: sinceS, kinds, at_issue: $('#scIssue').checked,
+  const base = { val_date: vd, since: sinceS, kinds, at_issue: $('#scIssue').checked, book: $('#scBook').checked,
     credit: { mode: $('#scNice').checked ? 'nice' : 'fixed', fallback: $('#scGrade').value } };
   if (window.CBR_WEB) {
     base.rf = scSplit('#scRf'); base.rd = scSplit('#scRd');
@@ -449,6 +485,8 @@ function applyKindLayout(it, prevKind) {
   const so = it.kind === 'SO';
   $('#peerBox').classList.toggle('hidden', !unlisted());
   $('#spreadWrap').classList.toggle('hidden', so || it.kind === 'OPT');
+  $('#bookCard').classList.toggle('hidden', so || it.kind === 'OPT');
+  $('#bookBox').innerHTML = ''; $('#bookTag').textContent = '';
   $('#spreadBox').innerHTML = '';
   $('#soNote').classList.toggle('hidden', !(so || it.kind === 'OPT'));
   if (it.kind === 'OPT') {
@@ -1174,6 +1212,7 @@ window.addEventListener('DOMContentLoaded', () => {
   $('#val_date').addEventListener('change', () => { if (st.issue) loadIssue(st.issue, true); });
   $('#btnCurves').onclick = async () => { st.gradeManual = false; await loadCredit(); await loadCurves(); };
   $('#btnImplied').onclick = doImplied;
+  $('#btnBook').onclick = doBook;
   document.querySelectorAll('#tabs .tab').forEach((b) => { b.onclick = () => showTab(b.dataset.tab); });
   if (location.hash === '#screen') showTab('screen');
   $('#placement').addEventListener('change', async () => { st.gradeManual = false; await loadCredit(); await loadCurves(); });

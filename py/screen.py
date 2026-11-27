@@ -180,7 +180,31 @@ def _rcps_candidates(corp, since, items):
     return out
 
 
-def value_corp(corp, val_date, since, kinds=("CB", "BW", "EB"), credit=None, curves=None, at_issue=False, ras=None):
+def _book_side(row, f, v, kind, corp, items, ras, cv, credit, private, val_date):
+    """장부 대조: 평가기준일에 맞는 정기보고서 주석의 회차 파생상품부채(공정가치)와 보고기간 말 재계산값."""
+    rep = notes.pick_report(items, val_date)
+    if not rep or (v.get("발행일") and v["발행일"] > rep["period"]):
+        return
+    per = rep["period"]
+    bk = notes.book_values(rep["rcept_no"], kind, v.get("회차") or row.get("bd_tm"), v.get("발행총액"))
+    row["book_period"] = per
+    if bk.get("derivative") is None:
+        if bk.get("total_derivative"):
+            row["notes"].append(f"장부 파생상품부채는 회차 합계만 공시 ({bk['total_derivative'] / 1e8:,.1f}억 · 회차 {len(bk['series_seen'])}개)")
+        return
+    mk = _stock(ras, corp["stock_code"], per, corp.get("corp_cls"))
+    grade, _ = _grade(ras, corp, per, private, credit.get("mode"), credit.get("fallback") or "B+")
+    c = cv.get(per, grade)
+    res = value_state(_state(f, per, kind, mk["price"], mk["vol"], c["rf"], c["rd"]))
+    calc = res["전체가치"] if kind in ("RCPS", "CPS") else res["전체가치"] - (res.get("일반사채") or 0)
+    b = bk["derivative"]
+    row.update({"book_deriv": b, "calc_deriv": calc, "book_gap": (calc - b) / abs(b) * 100 if b else None,
+                "book_scope": bk.get("scope"), "book_model": bk.get("model")})
+    if bk.get("scope") == "회차(단일)":
+        row["notes"].append("장부 파생 = 공정가치 서열체계 합계 (공시된 회차가 하나)")
+
+
+def value_corp(corp, val_date, since, kinds=("CB", "BW", "EB"), credit=None, curves=None, at_issue=False, ras=None, book=False):
     """회사 하나의 기간 안 발행 회차를 모두 평가 → 표 행 목록."""
     credit = credit or {}
     cv = curves or Curves(ras)
@@ -259,6 +283,11 @@ def value_corp(corp, val_date, since, kinds=("CB", "BW", "EB"), credit=None, cur
                         "price_date": mk["price_date"], "vol_src": mk["source"]})
             if at_issue and v.get("발행일"):
                 _issue_side(row, f, v, kind, corp, ras, cv, credit, private)
+            if book:
+                try:
+                    _book_side(row, f, v, kind, corp, items, ras, cv, credit, private, val_date)
+                except Exception as ex:
+                    row["notes"].append(f"장부 대조 실패: {str(ex)[:50]}")
         except Exception as ex:
             row["status"] = "평가 불가: " + str(ex)[:120]
         rows.append(row)

@@ -1138,6 +1138,138 @@ def borrow_rates(rc):
             "median": vals[len(vals) // 2] if vals else None}
 
 
+DERIV_RE = r"파생\s*(?:상품|금융)?\s*(?:금융)?\s*부채|파생상품부채|파생금융부채|내재파생"
+_AMT = re.compile(r"^\(?-?[\d,]{3,}\)?$")
+
+
+def _amt(x):
+    t = (x or "").strip()
+    if not _AMT.match(t):
+        return None
+    v = num(t)
+    return -abs(v) if t.startswith("(") else v
+
+
+def _series_re(bd_tm):
+    n = re.sub(r"\D", "", str(bd_tm or ""))
+    return re.compile(rf"(?<!\d)0*{n}\s*(?:회|차)(?!\d)") if n else None
+
+
+def _unit(vals, face):
+    """표 금액 단위 맞추기: 표의 발행가액(일부 상환·전환되면 잔액)이 발행총액의 2~102%가 되는 배수 (원·천원·백만원)."""
+    for v in vals:
+        if v and face:
+            for k in (1, 1000, 1e6):
+                if face * 0.02 <= v * k <= face * 1.02:
+                    return k
+    return None
+
+
+def book_values(rc, kind, bd_tm, face):
+    """정기보고서 주석에서 회차의 장부 값: 파생상품부채(공정가치), 사채 장부금액(상각후원가), 평가 가정(주가·변동성·할인율).
+    회차별 열 표 → 회차 행 → (회차 구분이 없으면) 공정가치 서열체계의 파생상품부채 합계 순으로 찾는다."""
+    sre = _series_re(bd_tm)
+    out = {"derivative": None, "bond_book": None, "unit": None, "src": None, "scope": None, "assume": {}, "model": None,
+           "total_derivative": None, "series_seen": set()}
+    T = xml_tables(rc)
+    pref = kind in ("RCPS", "CPS")
+    for t in T:
+        rows = t["rows"]
+        if not rows:
+            continue
+        head = [c["t"] for c in rows[0]]
+        for r in rows:
+            m = re.search(r"제\s*(\d+)\s*회", r[0]["t"]) if r else None
+            if m and re.search(r"사채|전환|신주인수권|교환", r[0]["t"]):
+                out["series_seen"].add(m.group(1))
+        for c in head:
+            m = re.fullmatch(r"\s*제?\s*(\d+)\s*회(?:차)?\s*", c)
+            if m:
+                out["series_seen"].add(m.group(1))
+        if not sre or pref:
+            continue
+        col = next((i for i, c in enumerate(head) if sre.search(c) and len(c) < 30), None)
+        if col is not None and out["derivative"] is None:
+            lab = {re.sub(r"\s", "", r[0]["t"]): r for r in rows[1:] if r}
+            issue = next((r for k, r in lab.items() if re.match(r"(발행가액|액면금액|권면)", k)), None)
+            u = _unit([_amt(issue[col]["t"])] if issue and len(issue) > col else [], face)
+            drow = next((r for k, r in lab.items() if re.search(DERIV_RE, k) and len(r) > col), None)
+            brow = next((r for k, r in lab.items() if re.match(r"장부금액", k) and len(r) > col), None)
+            if drow is not None and (u or face is None):
+                u = u or 1
+                out.update({"derivative": (_amt(drow[col]["t"]) or 0) * u, "unit": u, "src": "회차별 열 표", "scope": "회차"})
+                if brow is not None:
+                    out["bond_book"] = (_amt(brow[col]["t"]) or 0) * u
+                continue
+        for r in rows[1:]:
+            if not r or not sre.search(r[0]["t"]):
+                continue
+            cells = [c["t"] for c in r]
+            if out["derivative"] is None and any(re.search(DERIV_RE, x) for x in cells[1:3]):
+                v = next((_amt(x) for x in cells[1:] if _amt(x) is not None), None)
+                if v is not None:
+                    out.update({"derivative": v, "src": "회차 행 (단위 확인)", "scope": "회차"})
+        if out["bond_book"] is None:
+            blk = None
+            for r in rows[1:]:
+                if not r:
+                    continue
+                lab0 = re.sub(r"\s", "", r[0]["t"])
+                if re.search(r"사채", r[0]["t"]) and re.search(r"제\s*\d+\s*회", r[0]["t"]):
+                    blk = bool(sre.search(r[0]["t"]))
+                    if blk:
+                        fv = next((_amt(c["t"]) for c in r[1:] if _amt(c["t"]) is not None), None)
+                        out["_face_cell"] = fv
+                    continue
+                if blk and re.match(r"(합계|장부금액|소계)", lab0):
+                    v = next((_amt(c["t"]) for c in r[1:] if _amt(c["t"]) is not None), None)
+                    u = _unit([out.get("_face_cell")], face) or 1
+                    if v is not None:
+                        out["bond_book"] = v * u
+                    blk = None
+        if col is not None:
+            for r in rows[1:]:
+                if not r or len(r) <= col:
+                    continue
+                k = re.sub(r"\s", "", r[0]["t"])
+                for key, pat in (("주가", r"기초자산가격|주가"), ("전환가", r"전환가격|행사가격"), ("변동성", r"변동성"),
+                                 ("무위험", r"무위험"), ("할인율", r"위험이자율|할인율|신용위험")):
+                    if re.search(pat, k) and key not in out["assume"] and not k.startswith("금리") \
+                            and not (key == "할인율" and "무위험" in k):
+                        out["assume"][key] = r[col]["t"].strip()
+    for t in T:
+        rows = t["rows"]
+        head = " ".join(c["t"] for c in rows[0]) if rows else ""
+        if re.search(r"수준\s*3|Level\s*3", head, re.I):
+            for r in rows[1:]:
+                lab0 = r[0]["t"] if r else ""
+                want = r"(?:상환)?전환우선주\s*부채|우선주\s*부채|종류주식\s*부채" if pref else DERIV_RE
+                if re.search(want, lab0):
+                    vals = [_amt(c["t"]) for c in r[1:] if _amt(c["t"]) is not None]
+                    if vals and out["total_derivative"] is None:
+                        out["total_derivative"] = vals[-1]
+            if out["total_derivative"] is not None:
+                break
+    for t in T:
+        rows = t["rows"]
+        if rows and any("가치평가방법" in c["t"] or "평가기법" in c["t"] for c in rows[0]):
+            for r in rows[1:]:
+                if r and re.search(DERIV_RE if not pref else r"우선주", r[0]["t"]):
+                    mc = next((c["t"] for c in r[1:] if re.search(r"모형|모델|이항|Tsiveriotis|Black|몬테|격자|할인법|Lattice", c["t"], re.I)), None)
+                    if mc:
+                        out["model"] = mc.strip()[:40]
+                        break
+    n_series = len(out["series_seen"])
+    if out["derivative"] is None and out["total_derivative"] is not None:
+        if n_series <= 1 or pref:
+            out.update({"derivative": out["total_derivative"], "src": "공정가치 서열체계 합계", "scope": "회차(단일)" if n_series <= 1 else "합계"})
+        else:
+            out.update({"src": "공정가치 서열체계 합계", "scope": "합계"})
+    out["series_seen"] = sorted(out["series_seen"], key=lambda x: int(x))
+    out.pop("_face_cell", None)
+    return out
+
+
 ALL = ("CB", "BW", "EB", "RCPS", "CPS", "SO", "PUT", "CALL")
 SOURCES = [
     (r"전환주식\s*매수선택권|제3자의\s*전환주식\s*매수선택권", ("RCPS", "CPS", "CALL"), "Call",

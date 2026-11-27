@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DART 복합금융상품 리뷰 대시보드</title>
-<link rel="stylesheet" href="css/style.css?v=202611271527">
-<link rel="stylesheet" href="css/web.css?v=202611271527">
+<link rel="stylesheet" href="css/style.css?v=202611271555">
+<link rel="stylesheet" href="css/web.css?v=202611271555">
 </head>
 <body>
 <header class="top">
@@ -120,6 +120,13 @@
         <button id="btnDW2" class="primary alt">Temp DW 입력용 엑셀 받기</button>
       </div>
 
+      <div class="card" id="bookCard">
+        <div class="cardhead"><span class="kicker">장부</span>장부 대조 — 정기보고서 주석의 파생상품부채·평가 가정 <span class="muted" id="bookTag"></span></div>
+        <div class="note">회사가 재무제표에 계상한 공정가치(외부평가 결과)를 같은 보고기간 말 시장자료로 대시보드가 다시 계산한 값과 비교합니다.</div>
+        <button id="btnBook" class="ghost">보고기간 말 기준 재계산·대조</button>
+        <div id="bookBox"></div>
+      </div>
+
       <div class="card hidden" id="resultCard">
         <div class="cardhead"><span class="kicker">8</span>평가 결과 <span class="tag warn">참고 추정치 · 확정은 Temp</span></div>
         <table class="res" id="resTable"></table>
@@ -177,6 +184,7 @@
     </div>
     <label class="check" id="scNiceWrap"><input type="checkbox" id="scNice"> 회사별 나이스 등급 사용 — 사내 전용, 등급이 없는 회사는 법인 서버가 나이스에서 새로 수집합니다 (없으면 위 신용 가정)</label>
     <label class="check"><input type="checkbox" id="scIssue" checked> 발행시점 이론가치·내재 스프레드 계산 (발행일 주가·변동성·곡선으로 다시 평가 — 회차당 수 초)</label>
+    <label class="check"><input type="checkbox" id="scBook" checked> 장부 대조 — 정기보고서 주석의 회차 파생상품부채(공정가치)를 보고기간 말 재계산값과 비교</label>
     <div id="scCurves" class="hidden grid2">
       <label>Rf 국고채 16칸 (모든 회차에 같은 곡선)<textarea id="scRf" rows="2"></textarea></label>
       <label>Rd 신용 가정 등급 14칸<textarea id="scRd" rows="2"></textarea></label>
@@ -195,8 +203,8 @@
   </div>
 </main>
 <div id="toast" class="toast hidden"></div>
-<script src="js/config.js?v=202611271527"></script>
-<script src="js/web.js?v=202611271527"></script>
-<script src="js/app.js?v=202611271527"></script>
+<script src="js/config.js?v=202611271555"></script>
+<script src="js/web.js?v=202611271555"></script>
+<script src="js/app.js?v=202611271555"></script>
 </body>
 </html>
