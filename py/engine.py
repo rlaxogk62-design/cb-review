@@ -421,6 +421,88 @@ def value(p):
     return {"result": res, "info": info}
 
 
+def _ncdf(x):
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+
+def bs_option(S, K, T, r, sigma, q=0.0, put=False):
+    """블랙-숄즈 유럽형 (r: 연속복리 무위험, q: 연속 배당수익률). 참고값."""
+    if T <= 0 or sigma <= 0:
+        return max((K - S) if put else (S - K), 0.0)
+    v = sigma * math.sqrt(T)
+    d1 = (math.log(S / K) + (r - q + 0.5 * sigma * sigma) * T) / v
+    d2 = d1 - v
+    if put:
+        return K * math.exp(-r * T) * _ncdf(-d2) - S * math.exp(-q * T) * _ncdf(-d1)
+    return S * math.exp(-q * T) * _ncdf(d1) - K * math.exp(-r * T) * _ncdf(d2)
+
+
+def so_value(p):
+    """주식선택권 1개당 공정가치 — Temp SO 시트(Americal Call): 행사기간(행사시작일~행사종료일) 안의 노드에서만
+    조기행사(MAX(S−K, 계속보유)), 만기 노드는 MAX(S−K, 0). 격자·금리는 CB 격자와 같다:
+    Δt = 1/연간step, 단계 = ROUND(잔존×연간step), u = ROUND(EXP(ROUND(σ√Δt,5)),5), Rf 선도금리, 단계 할인 EXP(−rf·Δt).
+    배당수익률 q가 있으면 위험중립 확률에 반영한다 (Temp는 배당 없음)."""
+    val, mat = _d(p["val_date"]), _d(p["maturity"])
+    T = yf(val, mat)
+    if T <= 0:
+        raise ValueError("측정일(부여일 또는 평가기준일)이 행사종료일 이후입니다.")
+    spy = float(p.get("steps_per_year") or 52)
+    N = max(8, int(round(T * spy)))
+    dtt = 1.0 / spy
+    zf = curve(RF_TENORS, p["rf_curve"], p.get("rf_kind") or "par")
+
+    def fwd(i):
+        t0, t1 = i * dtt, (i + 1) * dtt
+        return (zf(t1) * t1 - (zf(t0) * t0 if i else 0.0)) / dtt
+
+    rf = [fwd(i) for i in range(N)]
+    use_rd = p.get("discount") == "Rd" and p.get("rd_curve")
+    if use_rd:
+        zd = curve(RD_TENORS, p["rd_curve"], p.get("curve_kind") or "par")
+        rd = [(zd((i + 1) * dtt) * (i + 1) * dtt - (zd(i * dtt) * i * dtt if i else 0.0)) / dtt for i in range(N)]
+    sig = float(p["sigma"])
+    q = float(p.get("div_yield") or 0)
+    u = round(math.exp(round(sig * math.sqrt(dtt), 5)), 5)
+    dn = 1 / u
+    S0, K0 = float(p["S"]), float(p["strike"])
+    is_put = p.get("option_type") == "Put"
+    ky, kcomp = float(p.get("strike_rate") or 0), p.get("strike_comp") or "연복리"
+    kbase = _d(p.get("strike_base") or val)
+
+    def strike_at(i):
+        if not ky:
+            return K0
+        d = val + dt.timedelta(days=round(i * dtt * 365))
+        return K0 * ratio_for(ky, kcomp, max(0.0, years_between(kbase, d) if d > kbase else 0.0), 1)
+
+    def idx(d):
+        return min(N, max(0, int(round(yf(val, d) * spy))))
+
+    ex_from = idx(max(_d(p.get("ex_start") or val), val))
+    ex_to = idx(min(_d(p.get("ex_end") or mat), mat))
+
+    def pay(s, i):
+        k = strike_at(i)
+        return max((k - s) if is_put else (s - k), 0.0)
+
+    V = [pay(S0 * u ** (2 * j - N), N) for j in range(N + 1)]
+    for i in range(N - 1, -1, -1):
+        pu = (math.exp((rf[i] - q) * dtt) - dn) / (u - dn)
+        if not 0 < pu < 1:
+            raise ValueError("격자 확률이 0~1을 벗어났습니다. 연 Step 수를 늘리거나 변동성을 확인하세요.")
+        df = math.exp(-(rd[i] if use_rd else rf[i]) * dtt)
+        exercisable = ex_from <= i <= ex_to
+        for j in range(i + 1):
+            cont = df * (pu * V[j + 1] + (1 - pu) * V[j])
+            V[j] = max(pay(S0 * u ** (2 * j - i), i), cont) if exercisable else cont
+    bs = bs_option(S0, strike_at(N), T, zf(T), sig, q, is_put)
+    if use_rd:
+        bs *= math.exp(-(zd(T) - zf(T)) * T)
+    info = {"N": N, "T": T, "rf_T": math.exp(zf(T)) - 1, "u": u, "ex_from": ex_from, "ex_to": ex_to, "kind": "SO",
+            "discount": "Rd" if use_rd else "Rf", "strike_T": strike_at(N), "option_type": "Put" if is_put else "Call"}
+    return {"result": {"옵션1개당": V[0], "BS유럽형": bs}, "info": info}
+
+
 def implied_conv_at_issue(res, issue_amount):
     """발행일 평가(전체FV = 발행금액 기준): 전환권을 끼워맞춤 값으로 바꾼다 (리뷰 양식 1.2)."""
     r = dict(res)

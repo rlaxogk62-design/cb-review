@@ -69,6 +69,12 @@ dart._corps = [{"corp_code": a, "corp_name": b, "stock_code": c}
                for a, b, c in json.load(open("/app/data/corps.json", encoding="utf-8"))]
 
 
+def add_corps(text):
+    """비상장사 목록을 검색 목록 뒤에 더한다 (상장사 먼저 로드, 비상장은 백그라운드)."""
+    dart._corps.extend({"corp_code": a, "corp_name": b, "stock_code": c} for a, b, c in json.loads(text))
+    return len(dart._corps)
+
+
 def set_proxy(url):
     global PROXY
     PROXY = (url or "").strip().rstrip("/")

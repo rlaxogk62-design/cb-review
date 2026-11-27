@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DART 복합금융상품 리뷰 대시보드</title>
-<link rel="stylesheet" href="css/style.css?v=202611261621">
-<link rel="stylesheet" href="css/web.css?v=202611261621">
+<link rel="stylesheet" href="css/style.css?v=202611271046">
+<link rel="stylesheet" href="css/web.css?v=202611271046">
 </head>
 <body>
 <header class="top">
@@ -25,9 +25,9 @@
     <div id="proxyMsg" class="note"></div>
   </div>
   <section class="hero">
-    <div class="eyebrow">상장사 CB · BW · EB</div>
+    <div class="eyebrow">CB · BW · EB · RCPS · SO — 비상장 포함</div>
     <h1>공시를 불러오면 입력·평가·리뷰 엑셀까지</h1>
-    <p>회사를 검색하고 회차를 고르면 DART 공시에서 발행조건·조정 이력·잔액을 채웁니다. 입력칸을 누르면 오른쪽 원문에서 근거 문구에 형광펜이 칠해집니다.</p>
+    <p>회사를 검색하고 회차를 고르면 DART 공시(발행결정·정기보고서 주석)에서 발행조건·조정 이력·잔액을 채웁니다. 비상장사도 사업·분기·감사보고서가 있으면 RCPS·주식선택권 조건을 읽습니다. 입력칸을 누르면 오른쪽 원문에서 근거 문구에 형광펜이 칠해집니다.</p>
     <p class="privacy">계산과 엑셀 만들기는 모두 이 브라우저 안에서 합니다. 입력값·평가 결과는 어디에도 저장·전송되지 않고, DART 공시와 주가 조회만 중계 서버를 거칩니다.</p>
     <div class="searchrow">
       <input id="q" placeholder="회사명 또는 종목코드 6자리" autocomplete="off">
@@ -65,6 +65,13 @@
             <option value="iqr">1년 + 이상치 조정(IQR 1.5배) × √250 — 평가사(KAP) backdata 방식</option></select></label>
           <label>측정기간 (S_vol C3)<select id="period"><option>1년</option><option>잔여만기</option></select></label>
           <label>측정일수 (S_vol G2)<input type="number" id="window" value="180"></label>
+        </div>
+        <div id="soNote" class="note warnc hidden"></div>
+        <div id="peerBox" class="peerbox hidden">
+          <label class="wide">유사기업 종목코드 (비상장 변동성 — Temp proxy1~5)
+            <input id="peers" placeholder="예: 048910, 020120, 263720 (쉼표·공백으로 구분)" autocomplete="off"></label>
+          <button id="btnPeers" class="ghost">유사기업 변동성 계산</button>
+          <div id="peerNote" class="note"></div>
         </div>
         <button id="btnMarket" class="ghost">주가·변동성 다시 불러오기</button>
         <div id="marketNote" class="note">회차를 고르면 야후 파이낸스에서 받아 Temp S_vol 방식으로 계산합니다.</div>
@@ -123,6 +130,10 @@
         <div class="cardhead"><span class="kicker">!</span>유의 포인트 <span class="muted" id="alertCount"></span></div>
         <div id="alerts" class="alerts"></div>
       </div>
+      <div class="card relcard">
+        <div class="cardhead"><span class="kicker">공시</span>관련 공시 — 이 상품의 조건·조정·잔액 근거 <span class="muted" id="relCount"></span></div>
+        <div id="related" class="related"></div>
+      </div>
       <div class="card doccard">
         <div class="cardhead"><span class="kicker">원문</span><span id="docTitle">입력칸을 누르면 근거가 여기 표시됩니다</span>
           <a id="docLink" target="_blank" rel="noopener" class="link hidden">DART에서 열기 ↗</a></div>
@@ -133,8 +144,8 @@
   </div>
 </main>
 <div id="toast" class="toast hidden"></div>
-<script src="js/config.js?v=202611261621"></script>
-<script src="js/web.js?v=202611261621"></script>
-<script src="js/app.js?v=202611261621"></script>
+<script src="js/config.js?v=202611271046"></script>
+<script src="js/web.js?v=202611271046"></script>
+<script src="js/app.js?v=202611271046"></script>
 </body>
 </html>

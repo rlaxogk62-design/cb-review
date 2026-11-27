@@ -92,7 +92,11 @@ def stock(code, dday, market=None, period_type="1년", maturity=None, window=180
     sources = []
     if ras is not None:
         sources.append(("법인 서버", lambda: ras.prices_ras(code, dday, period_type, maturity)))
-    sources.append(("야후", lambda: prices_yahoo(code, market, dday)))
+    if market in ("Y", "K"):
+        sources.append(("야후", lambda: prices_yahoo(code, market, dday)))
+    else:
+        sources.append(("야후(KS)", lambda: prices_yahoo(code, "Y", dday)))
+        sources.append(("야후(KQ)", lambda: prices_yahoo(code, "K", dday)))
     for label, fetch in sources:
         try:
             rows, src, name = fetch()

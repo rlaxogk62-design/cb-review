@@ -41,7 +41,63 @@ const GROUPS = [
     ['Call순위', 'Call 순위', 'sel:선순위|후순위', 'BI'], ['Call3자배정', '제3자 지정', 'sel:Y|N', 'BJ'], ['Call일정', 'Call 일정표', 'sched', 'CO~DR'],
   ] },
 ];
+// 종류주식(RCPS·CPS) — Temp RCPS 실무 입력례: 같은 DW 열, 만기 = 존속기간 만료일, 만기보장R = 상환 이율,
+// Put초일(AV) = MAX(계약Put초일 AX, 배당가능초일 AW)
+const RCPS_GROUPS = [
+  { k: '2', title: '우선주 조건', rows: [
+    ['회차', '회차', 'text', 'F'], ['발행일', '발행일', 'date', 'AF'], ['만기일', '존속기간 만료일', 'date', 'AG'],
+    ['발행총액', '발행총액(원)', 'money', 'AE'], ['잔여총액', '잔여총액(원)', 'money', 'AB'],
+    ['주당발행가', '주당 발행가(원)', 'money', 'AD'], ['발행주식수', '발행주식수', 'num', 'AC'], ['액면가', '액면가(원)', 'money', 'AI'],
+    ['표면이자율', '표면R (우선배당)', 'pct', 'AH'], ['만기이자율', '상환 이율 (만기보장R)', 'pct', 'AJ'],
+    ['상환활증방식', '상환 복리 방식', 'sel:연복리|분복리|단리|고정율', 'AL'], ['사모여부', '발행 방법', 'sel:사모|공모', '할인율'],
+  ] },
+  { k: '3', title: '전환 조건', rows: [
+    ['최초전환가격', '최초 전환가격', 'money', 'AO'], ['현조정행사가격', '현 조정 전환가격', 'money', 'AN'],
+    ['전환초일', '전환청구 시작일', 'date', 'AQ'], ['전환말일', '전환청구 종료일', 'date', 'AR'],
+    ['상하향조정', '리픽싱(상하향)', 'sel:일반|하|상하|공모가조정|old하|old상하', 'AT'], ['공모가하한', 'IPO 공모가 기준', 'pct', 'AU'],
+    ['Refix최소', '리픽싱 하한(원, 시가조정)', 'num', 'AU'],
+  ] },
+  { k: '4', title: '상환청구(Put) · 회사 상환(Call)', rows: [
+    ['Put초일', '계약 상환청구 시작일', 'date', 'AX'], ['배당가능초일', '배당가능초일 (상환재원)', 'date', 'AW'],
+    ['Put말일', '상환청구 종료일', 'date', 'AY'], ['Put연회수', '상환청구 연 횟수', 'num', 'BB'],
+    ['YTP', '상환 이율 (YTP)', 'pct', 'AZ'], ['YTP복리', 'YTP 복리', 'sel:연복리|분복리|단리|고정율', 'BA'],
+    ['Call초일', 'Call 시작일', 'date', 'BC'], ['Call말일', 'Call 종료일', 'date', 'BD'], ['Call연회수', 'Call 연 횟수', 'num', 'BG'],
+    ['YTC', 'Call 이율', 'pct', 'BE'], ['YTC복리', 'YTC 복리', 'sel:연복리|분복리|단리|고정율', 'BF'], ['Call한도', 'Call 한도', 'pct', 'BH'],
+    ['Call순위', 'Call 순위', 'sel:선순위|후순위', 'BI'], ['Call3자배정', '제3자 지정', 'sel:Y|N', 'BJ'],
+    ['Call일정', 'Call 일정표', 'sched', 'CO~DR'],
+  ] },
+];
+// 풋·콜옵션 (주식 대상) — Temp SO 시트 방식: 행사기간 안 조기행사, 할인 Rf 또는 Rd(SO후속), 행사가에 이율이 붙을 수 있음
+const OPT_GROUPS = [
+  { k: '2', title: '풋·콜옵션 조건 — 계약서(주주간 계약·투자계약)로 확인', rows: [
+    ['회차', '옵션명', 'text', 'F'], ['옵션종류', '옵션 종류 (권리자 기준)', 'sel:Put|Call', 'E'],
+    ['수량', '대상 주식수', 'num', 'AC'], ['행사가격', '행사가격 (주당, 원)', 'money', 'AN'],
+    ['행사가증가율', '행사가 이율 (연)', 'pct', 'AJ'], ['행사가복리', '이율 방식', 'sel:연복리|분복리|단리', 'AL'],
+    ['행사가기산일', '이율 기산일 (투자일)', 'date', 'AF'],
+    ['행사시작일', '행사 시작일', 'date', 'AQ'], ['행사종료일', '행사 종료일 (만기)', 'date', 'AR'],
+    ['할인', '할인 곡선', 'sel:Rf|Rd', '참고'], ['권리자', '권리자', 'text', '참고'], ['의무자', '의무자', 'text', '참고'],
+  ] },
+];
+// 주식선택권 — Temp SO 시트: 행사기간(AQ~AR) 안에서만 조기행사하는 미국형 콜
+const SO_GROUPS = [
+  { k: '2', title: '주식선택권 조건', rows: [
+    ['회차', '차수', 'text', 'F'], ['부여일', '부여일 (측정일)', 'date', 'AF'], ['행사가격', '행사가격(원)', 'money', 'AN'],
+    ['행사시작일', '행사 시작일 (가득 후)', 'date', 'AQ'], ['행사종료일', '행사 종료일 (만기)', 'date', 'AR'],
+    ['부여수량', '부여수량 (최초)', 'num', '참고'], ['잔여수량', '기말 미행사 수량', 'num', 'AC'],
+    ['가득조건', '가득조건', 'text', '참고'], ['결제방식', '결제방식', 'sel:주식결제형|현금결제형', '참고'],
+    ['기대배당', '기대배당수익률', 'pct', '참고'],
+  ] },
+  { k: '3', title: '회사 평가 가정 (주석) — 재계산 기본값', rows: [
+    ['회사S', '기초자산 가격(원)', 'money', 'DS'], ['회사변동성', '기대주가변동성', 'pct', 'DT'], ['회사Rf', '무위험이자율', 'pct', 'DV'],
+    ['회사만기', '옵션만기', 'date', '참고'], ['회사FV', '공정가치 (1개당, 원)', 'money', '대조'],
+  ] },
+];
+const groupsFor = (kind) => (kind === 'SO' ? SO_GROUPS : kind === 'OPT' ? OPT_GROUPS : (kind === 'RCPS' || kind === 'CPS') ? RCPS_GROUPS : GROUPS);
+const DATE_WORD = { SO: '부여', RCPS: '발행', CPS: '발행' };
+const tmLabel = (it) => (it.kind === 'SO' || !/^\d+(-\d+)?$/.test(String(it.bd_tm || '')) ? String(it.bd_tm || '') : `제${it.bd_tm}회`);
+const PRICE_WORD = { SO: '행사가', RCPS: '전환가', CPS: '전환가' };
 const REPORT_KEYS = ['전체가치', '일반사채', 'Put', '전환권', 'Call'];
+const REPORT_KEYS_SO = ['옵션1개당'];
 // 곡선이 있는 등급 (2026-06-30 기준 확인: CCC0 이하·'B'처럼 0 없는 등급은 없음)
 const GRADES = ['AAA', 'AA+', 'AA0', 'AA-', 'A+', 'A0', 'A-', 'BBB+', 'BBB0', 'BBB-', 'BB+', 'BB0', 'BB-', 'B+', 'B0', 'B-', 'CCC+'];
 
@@ -64,7 +120,7 @@ function setGrade(code) {
   $('#credit_grade').value = use;
   return use !== code;
 }
-const KIND_WORD = { CB: '전환', EB: '교환', BW: '행사' };
+const KIND_WORD = { CB: '전환', EB: '교환', BW: '행사', RCPS: '전환', CPS: '전환', SO: '행사', OPT: '행사' };
 
 /* ------------------------------------------------------------ 공통 */
 function toast(msg, err = false, ms = 3200) {
@@ -105,16 +161,19 @@ async function doSearch() {
 async function pickCorp(c) {
   st.corp = c;
   const box = $('#issueList');
-  box.innerHTML = '<span class="muted">발행결정 공시를 불러오는 중…</span>';
+  box.innerHTML = '<span class="muted">발행결정 공시와 정기보고서 주석(RCPS·SO)을 불러오는 중…</span>';
   try {
-    const list = await api('/api/issues?corp_code=' + c.corp_code);
-    box.innerHTML = list.length ? '' : '<span class="muted">CB·BW·EB 발행결정 공시가 없습니다. (비상장 RCPS는 공시에 상세 조건이 없어 직접 입력이 필요합니다)</span>';
+    const list = await api(`/api/issues?corp_code=${c.corp_code}&val_date=${$('#val_date').value}`);
+    st.issues = list;
+    box.innerHTML = list.length ? '' : '<span class="muted">CB·BW·EB 발행결정 공시도, 정기보고서(사업·분기·감사보고서) 주석의 RCPS·SO도 찾지 못했습니다.</span>';
     list.forEach((it) => {
       const d = document.createElement('div');
       d.className = 'issue';
-      d.innerHTML = `<div class="k">${esc(it.kind)} · 제${esc(it.bd_tm)}회</div>
-        <div class="t">${esc(fmt(num(it.bd_fta)))}원</div>
-        <div class="d">결정 ${esc(it.bddd || '')} · ${KIND_WORD[it.kind]}가 ${esc(it.price || '-')} · 만기 ${esc(it.mtd || '-')}</div>`;
+      const so = it.kind === 'SO', opt = it.kind === 'OPT';
+      d.innerHTML = `<div class="k">${esc(opt ? '풋·콜' : it.kind)} · ${esc(tmLabel(it))}</div>
+        <div class="t">${opt ? (it.key === 'MANUAL' ? '계약서 조건 입력' : '주석 약정 문장') : so ? esc(it.bd_fta) : esc(fmt(num(it.bd_fta))) + '원'}</div>
+        ${opt ? '' : `<div class="d">${DATE_WORD[it.kind] || '결정'} ${esc(it.bddd || '')} · ${PRICE_WORD[it.kind] || KIND_WORD[it.kind] + '가'} ${esc(it.price || '-')} · 만기 ${esc(it.mtd || '-')}</div>`}
+        ${it.src ? `<div class="d src">${esc(it.src)}</div>` : ''}`;
       d.onclick = () => { [...box.children].forEach((x) => x.classList.remove('on')); d.classList.add('on'); loadIssue(it); };
       box.appendChild(d);
     });
@@ -128,22 +187,31 @@ async function loadIssue(it, keepManual = false) {
   toast('공시 원문·조정 이력·재무 정보를 읽는 중… (처음엔 20~40초)', false, 60000);
   busy(true);
   try {
-    const r = await api(`/api/load?corp_code=${st.corp.corp_code}&rcept_no=${it.rcept_no}&val_date=${vd}`);
+    const extra = it.note ? `&kind=${it.kind}&key=${encodeURIComponent(it.key || '')}` : '';
+    const r = await api(`/api/load?corp_code=${st.corp.corp_code}&rcept_no=${it.rcept_no}&val_date=${vd}${extra}`);
     const prev = st.fields;
+    const prevKind = st.loadedKind;
+    st.loadedKind = it.kind;
+    st.report = r.report || null;
     st.fields = r.fields;
-    if (keepManual) for (const [k, v] of Object.entries(prev)) if (v && v.manual) st.fields[k] = v;
+    if (keepManual && prevKind === it.kind) for (const [k, v] of Object.entries(prev)) if (v && v.manual) st.fields[k] = v;
     st.alerts = r.alerts.map((a) => ({ ...a, checked: a.level !== 'info' || a.cat === '회차' }));
     st.summary = r.summary; st.history = r.history;
     st.disc = {}; (r.disclosures || []).forEach((d) => { st.disc[d.rcept_no] = d; });
-    st.disc[it.rcept_no] = st.disc[it.rcept_no] || { report_nm: `${it.kind} 발행결정 (제${it.bd_tm}회)`, date: it.bddd };
+    st.disc[it.rcept_no] = st.disc[it.rcept_no]
+      || { report_nm: it.note ? (it.src || '정기보고서') : `${it.kind} 발행결정 (제${it.bd_tm}회)`, date: it.bddd };
     st.result = null;
     $('#work').classList.remove('hidden');
     $('#resultCard').classList.add('hidden');
     if (!keepManual) st.assume = {};
-    renderFields(); renderAlerts(); renderReport(); renderAssume();
+    st.related = r.related || [];
+    renderFields(); renderAlerts(); renderReport(); renderAssume(); renderRelated();
     if (!keepManual) $('#placement').value = (st.fields['사모여부'] || {}).value === '공모' ? '0' : '1';
+    applyKindLayout(it, prevKind);
     await showDoc(it.rcept_no);
-    $('#docTitle').textContent = `${st.corp.corp_name} ${it.kind} 제${it.bd_tm}회 발행결정 원문`;
+    $('#docTitle').textContent = it.note
+      ? `${st.corp.corp_name} ${it.kind} ${tmLabel(it)} — ${it.src || '정기보고서 주석'}`
+      : `${st.corp.corp_name} ${it.kind} 제${it.bd_tm}회 발행결정 원문`;
     (r.warnings || []).forEach((w) => toast(w, true, 6000));
     if (!(r.warnings || []).length) toast('공시 자동 입력 완료. 주가·등급·할인율을 불러오는 중…', false, 5000);
     st.seen = new Set(Object.keys(st.disc));
@@ -154,8 +222,49 @@ async function loadIssue(it, keepManual = false) {
   return true;
 }
 
+/* ------------------------------------------------------------ 상품별 화면 (CB·RCPS·SO) */
+const isSO = () => st.issue && st.issue.kind === 'SO';
+const isOpt = () => st.issue && st.issue.kind === 'OPT';
+const optLike = () => isSO() || isOpt();
+const unlisted = () => !st.corp || !st.corp.stock_code;
+function measureDate() {
+  // 주식결제형 SO는 부여일에 측정 (재측정 없음), 그 밖에는 평가기준일
+  if (isSO() && (st.fields['결제방식'] || {}).value !== '현금결제형') return (st.fields['부여일'] || {}).value || $('#val_date').value;
+  return $('#val_date').value;
+}
+function applyKindLayout(it, prevKind) {
+  const so = it.kind === 'SO';
+  $('#peerBox').classList.toggle('hidden', !unlisted());
+  $('#soNote').classList.toggle('hidden', !(so || it.kind === 'OPT'));
+  if (it.kind === 'OPT') {
+    $('#soNote').textContent = '풋·콜옵션: 행사가·이율·기산일·행사기간·수량을 계약서로 넣으세요. Temp SO 시트처럼 Put은 Rd, Call은 Rf로 할인합니다 (SO후속 — 할인 칸에서 바꿀 수 있음). '
+      + '비상장이면 평가기준일 주가·변동성을 직접 넣거나 유사기업으로 계산하세요.';
+  }
+  if (so) {
+    $('#soNote').textContent = `측정일 ${measureDate()} — ${((st.fields['결제방식'] || {}).value || '주식결제형')}. `
+      + '주가·변동성·Rf 칸에는 주석의 회사 가정이 들어가 있습니다 (회사 공정가치 재현용). 고쳐서 민감도를 볼 수 있습니다.';
+    // 곡선은 CB용으로 기억해 둔 값을 보관해 두고 SO 가정을 넣는다
+    if (prevKind !== 'SO') st.savedCurves = { rf: $('#rf').value, rd: $('#rd').value };
+    const f = (k) => (st.fields[k] || {}).value;
+    if (f('회사S') != null) $('#S').value = f('회사S');
+    if (f('회사변동성') != null) $('#sigma').value = (+f('회사변동성')).toFixed(4);
+    if (f('회사Rf') != null) { $('#rf').value = String(+(f('회사Rf') * 100).toFixed(4)); $('#rd').value = ''; }
+    st.market = { S: num($('#S').value), sigma: num($('#sigma').value), source: '주석(회사 평가 가정)' };
+    $('#mktSrc').textContent = '주석(회사 평가 가정)';
+    $('#marketNote').textContent = '주식선택권: 주석의 기초자산 가격·변동성을 넣었습니다. 상장사는 [주가·변동성 다시 불러오기]로 부여일 주가를 받을 수 있습니다.';
+    curveCount(false);
+  } else if (prevKind === 'SO' && st.savedCurves) {
+    $('#rf').value = st.savedCurves.rf; $('#rd').value = st.savedCurves.rd; curveCount(false);
+  }
+}
+
 /* ------------------------------------------------------------ 평가기준일 기준 시장자료 자동 수집 */
 async function autoMarketData() {
+  if (isSO()) {                                   // SO: 회사 가정을 이미 넣었다. 상장사이고 주가가 비었으면 부여일 주가를 받는다
+    if (!unlisted() && !num($('#S').value)) await loadMarket();
+    toast('주식선택권 조건과 회사 평가 가정을 채웠습니다. [평가 계산]으로 회사 공정가치와 대조하세요.');
+    return;
+  }
   await Promise.allSettled([loadMarket(), loadCredit()]);
   await loadCurves();
   toast('자동 입력 완료. 입력칸을 누르면 원문 근거가 형광펜으로 표시됩니다.');
@@ -253,7 +362,7 @@ function renderFields() {
   const host = $('#fieldCards');
   host.innerHTML = '';
   const word = KIND_WORD[st.issue.kind] || '전환';
-  GROUPS.forEach((g) => {
+  groupsFor(st.issue.kind).forEach((g) => {
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML = `<div class="cardhead"><span class="kicker">${g.k}</span>${esc(g.title.replace('전환', word))}</div>`;
@@ -287,6 +396,13 @@ function renderFields() {
           f.value = parsed(type, ctl.value); f.manual = true;
           ctl.classList.add('manual'); row.querySelector('.dot').className = 'dot manual';
           if (type === 'money' && f.value != null) ctl.value = shown(type, f.value);
+          // 풋·콜: Temp SO 시트처럼 Put이면 Rd, Call이면 Rf로 할인 — 할인을 직접 고르지 않았으면 따라 바꾼다
+          const d = st.fields['할인'];
+          if (key === '옵션종류' && d && !d.manual) {
+            d.value = f.value === 'Call' ? 'Rf' : 'Rd';
+            const sel = document.querySelector('.frow[data-key="할인"] select');
+            if (sel) sel.value = d.value;
+          }
           markStale();
         });
       }
@@ -426,6 +542,33 @@ async function showEvidence(key) {
 }
 
 /* ------------------------------------------------------------ 5. 유의 포인트 */
+const ROLE_ORDER = ['발행조건', '가액조정', '잔액변동', 'Call', '약정', '지분', '조정사유', '신용', '시장', '주석', '참고'];
+const ROLE_DESC = {
+  발행조건: '발행 시점 조건 (전환가·Put·Call·리픽싱·상환)', 가액조정: '전환·행사가 조정 이력', 잔액변동: '전환·행사·취득으로 잔여 수량 변동',
+  Call: 'Call(매수선택권) 지정·행사', 약정: '풋·콜·주주간 약정', 지분: '5% 보고·임원 소유 — CB 보유자, 콜·풋·담보 계약',
+  조정사유: '병합·분할·무상증자·합병 → 전환가·주식수 조정', 신용: '부도·회생·자본잠식·손익 → 신용등급·Rd, 상환 가능 여부',
+  시장: '거래정지·관리종목·상장폐지 → 주가·변동성 신뢰성, Put 사유', 주석: '정기보고서·감사보고서 주석', 참고: '그 밖에 확인할 공시',
+};
+function renderRelated() {
+  const box = $('#related');
+  const rel = st.related || [];
+  $('#relCount').textContent = rel.length ? `${rel.length}건` : '';
+  if (!rel.length) { box.innerHTML = '<span class="muted">관련 공시가 없습니다.</span>'; return; }
+  const by = {};
+  rel.forEach((d) => { (by[d.role] = by[d.role] || []).push(d); });
+  box.innerHTML = ROLE_ORDER.filter((r) => by[r]).map((role) => `<div class="relgrp"><div class="relrole">${esc(role)} <small>${by[role].length}</small>
+      <span class="muted">${esc(ROLE_DESC[role] || by[role][0].desc)}</span></div>
+      ${by[role].slice(0, 12).map((d) => `<a class="relitem" data-rc="${esc(d.rcept_no)}" title="${esc(d.desc)}">${esc(d.date)} ${esc(d.report_nm)}</a>`).join('')}
+      ${by[role].length > 12 ? `<div class="muted">외 ${by[role].length - 12}건</div>` : ''}</div>`).join('');
+  box.querySelectorAll('.relitem').forEach((a) => a.addEventListener('click', async () => {
+    const d = rel.find((x) => x.rcept_no === a.dataset.rc);
+    st.disc[d.rcept_no] = st.disc[d.rcept_no] || { report_nm: d.report_nm, date: d.date };
+    await showDoc(d.rcept_no);
+    $('#evBox').classList.remove('hidden');
+    $('#evBox').innerHTML = `<b>${esc(d.role)}</b> · ${esc(d.report_nm)} — ${esc(d.desc)}`;
+  }));
+}
+
 function renderAlerts() {
   const box = $('#alerts');
   box.innerHTML = '';
@@ -469,13 +612,21 @@ function renderAlerts() {
 /* ------------------------------------------------------------ 6. 기초자산·금리·평가사 값 */
 function renderReport() {
   const g = $('#reportGrid');
-  if (g.children.length) return;
-  REPORT_KEYS.forEach((k) => {
+  const keys = optLike() ? REPORT_KEYS_SO : REPORT_KEYS;
+  if (g.dataset.kind === keys.join()) return;
+  g.dataset.kind = keys.join();
+  g.innerHTML = '';
+  keys.forEach((k) => {
     const l = document.createElement('label');
-    l.innerHTML = `${k}<input data-rep="${k}" placeholder="${k === 'Call' ? '음수로 입력' : '원'}">`;
-    l.querySelector('input').addEventListener('change', (e) => { const v = num(e.target.value); e.target.value = v == null ? '' : fmt(v); markStale(); });
+    const lab = k === '옵션1개당' ? (isOpt() ? '공정가치 주당 (원, 평가사)' : '공정가치 1개당 (원, 회사·평가사)') : k;
+    l.innerHTML = `${lab}<input data-rep="${k}" placeholder="${k === 'Call' ? '음수로 입력' : '원'}">`;
+    l.querySelector('input').addEventListener('change', (e) => { const v = num(e.target.value); e.target.value = v == null ? '' : fmt(v, 2).replace(/\.00$/, ''); markStale(); });
     g.appendChild(l);
   });
+  if (isSO()) {                                   // 회사가 주석에 쓴 1개당 공정가치를 대조값으로 넣어 둔다
+    const fvc = (st.fields['회사FV'] || {}).value;
+    if (fvc != null) g.querySelector('[data-rep="옵션1개당"]').value = fmt(fvc, 2).replace(/\.00$/, '');
+  }
 }
 /* ------------------------------------------------------------ 평가보고서 가정 ↔ 공시 대조
  * [키, 화면 이름, 형식, 대시보드 값 가져오기]  형식: money(원, 0.5% 이내 일치) · pct(%p, 0.01%p 이내) · date · sel:… · text */
@@ -497,6 +648,35 @@ const ASSUME = [
   ['변동성', '변동성(%)', 'pct', () => num($('#sigma').value)],
   ['등급', '할인율 곡선 등급', 'text', () => $('#credit_grade').value || null],
 ];
+const ASSUME_RCPS = [
+  ...ASSUME.slice(0, 5),
+  ['배당가능초일', '배당가능초일 (상환재원)', 'date', () => fv('배당가능초일')],
+  ['Put초일', '상환청구 시작일', 'date', () => fv('Put초일')],
+  ...ASSUME.slice(5),
+];
+const ASSUME_SO = [
+  ['부여일', '부여일 (측정일)', 'date', () => fv('부여일')],
+  ['행사가격', '행사가격(원)', 'money', () => fv('행사가격')],
+  ['행사시작일', '행사 시작일', 'date', () => fv('행사시작일')],
+  ['행사종료일', '행사 종료일 (만기)', 'date', () => fv('행사종료일')],
+  ['잔여수량', '수량', 'money', () => fv('잔여수량')],
+  ['주가', '기초자산 가격(원)', 'money', () => num($('#S').value)],
+  ['변동성', '변동성(%)', 'pct', () => num($('#sigma').value)],
+  ['Rf', '무위험이자율(%)', 'pct', () => { const c = curve('#rf'); return c.length === 1 ? c[0] / 100 : null; }],
+  ['기대배당', '기대배당수익률(%)', 'pct', () => fv('기대배당')],
+];
+const ASSUME_OPT = [
+  ['옵션종류', '옵션 종류', 'sel:Put|Call', () => fv('옵션종류')],
+  ['행사가격', '행사가격(원)', 'money', () => fv('행사가격')],
+  ['행사가증가율', '행사가 이율(%)', 'pct', () => fv('행사가증가율')],
+  ['행사시작일', '행사 시작일', 'date', () => fv('행사시작일')],
+  ['행사종료일', '행사 종료일', 'date', () => fv('행사종료일')],
+  ['수량', '대상 주식수', 'money', () => fv('수량')],
+  ['주가', '주가(원)', 'money', () => num($('#S').value)],
+  ['변동성', '변동성(%)', 'pct', () => num($('#sigma').value)],
+  ['할인', '할인 곡선', 'sel:Rf|Rd', () => fv('할인')],
+];
+const assumeList = () => (isSO() ? ASSUME_SO : isOpt() ? ASSUME_OPT : (st.issue && ['RCPS', 'CPS'].includes(st.issue.kind)) ? ASSUME_RCPS : ASSUME);
 st.assume = st.assume || {};
 function assumeShow(type, v) {
   if (v == null || v === '') return '';
@@ -518,7 +698,7 @@ function assumeJudge(type, ours, theirs) {
   return String(ours).trim() === String(theirs).trim() ? { mark: '✓', diff: '' } : { mark: '✗', diff: '다름' };
 }
 function assumeRows() {
-  return ASSUME.map(([k, label, type, get]) => {
+  return assumeList().map(([k, label, type, get]) => {
     const ours = get(), theirs = st.assume[k];
     return { k, label, type, ours, theirs, ...assumeJudge(type, ours, theirs) };
   });
@@ -536,7 +716,7 @@ function renderAssume() {
     return `<tr><td>${esc(r.label)}</td><td>${esc(assumeShow(r.type, r.ours))}</td><td>${input}</td><td class="${cls}">${r.mark} ${esc(r.diff)}</td></tr>`;
   }).join('');
   t.querySelectorAll('[data-as]').forEach((el) => el.addEventListener('change', () => {
-    const k = el.dataset.as, type = ASSUME.find((a) => a[0] === k)[2];
+    const k = el.dataset.as, type = assumeList().find((a) => a[0] === k)[2];
     const v = el.value.trim();
     st.assume[k] = v === '' ? null : type === 'pct' ? num(v) / 100 : type === 'money' ? num(v) : v;
     renderAssume();
@@ -556,16 +736,23 @@ function report() {
   return o;
 }
 const curve = (id) => $(id).value.split(/[\s,;]+/).map((x) => x.trim()).filter((x) => x !== '').map(Number).filter((x) => !isNaN(x));
-function curveCount() {
+function curveCount(save = true) {
   const rf = curve('#rf').length, rd = curve('#rd').length;
   $('#curveCount').textContent = `Rf ${rf}/16 · Rd ${rd}/14`;
   $('#curveCount').className = 'muted' + (rf === 16 && rd === 14 ? '' : ' warnc');
-  localStorage.setItem('curves', JSON.stringify({ rf: $('#rf').value, rd: $('#rd').value, grade: $('#credit_grade').value }));
+  if (save && !isSO()) localStorage.setItem('curves', JSON.stringify({ rf: $('#rf').value, rd: $('#rd').value, grade: $('#credit_grade').value }));
 }
 
 async function loadMarket() {
-  if (!st.corp || !st.corp.stock_code) { $('#marketNote').textContent = '상장 종목코드가 없어 주가를 불러올 수 없습니다. 직접 입력하세요.'; return; }
-  const vd = $('#val_date').value;
+  if (unlisted()) {
+    const hint = latestFinancingPrice();
+    $('#marketNote').innerHTML = '비상장: 주가(1주 가치)는 평가사 가정·최근 투자 단가 등으로 직접 넣고, 변동성은 아래 유사기업 코드로 계산하세요 (Temp proxy1~5).'
+      + (hint ? `<div class="muted">참고 — 최근 종류주식 발행가: ${esc(hint)}</div>` : '');
+    $('#mktSrc').textContent = '비상장 — 직접 입력';
+    st.market.source = '수동 입력';
+    return;
+  }
+  const vd = measureDate();
   if (!vd) return toast('평가기준일을 먼저 넣어 주세요.', true);
   const btn = $('#btnMarket');
   btn.disabled = true;
@@ -600,6 +787,43 @@ function applyVolMethod() {
 }
 
 
+/* ------------------------------------------------------------ 비상장: 최근 투자 단가 · 유사기업 변동성 */
+function latestFinancingPrice() {
+  const pref = (st.issues || []).filter((x) => ['RCPS', 'CPS'].includes(x.kind) && x.bddd && x.bddd <= $('#val_date').value);
+  if (!pref.length) return null;
+  const it = pref.reduce((a, b) => (a.bddd >= b.bddd ? a : b));
+  return `${it.price}원 (제${it.bd_tm}회, ${it.bddd} 발행 — 주당 발행가)`;
+}
+
+async function loadPeers() {
+  const codes = $('#peers').value.trim();
+  if (!codes) return toast('유사기업 종목코드를 넣어 주세요 (예: 048910, 020120).', true);
+  const btn = $('#btnPeers');
+  btn.disabled = true;
+  $('#peerNote').textContent = '유사기업 주가·변동성 조회 중…';
+  try {
+    const mat = (st.fields['만기일'] || st.fields['행사종료일'] || {}).value || '';
+    const r = await api(`/api/peers?codes=${encodeURIComponent(codes)}&val_date=${measureDate()}&period=${encodeURIComponent($('#period').value)}`
+      + `&window=${$('#window').value || 180}&maturity=${mat}`);
+    st.peers = r.rows.filter((x) => x.vol).map((x) => ({ code: x.code, name: x.name }));
+    const useIqr = $('#volMethod').value === 'iqr' && r.avg_iqr;
+    const avg = useIqr ? r.avg_iqr : r.avg;
+    if (avg) {
+      $('#sigma').value = avg.toFixed(4);
+      st.market.source = `유사기업 ${r.n}개 평균`;
+      st.market.volMethod = useIqr ? '1년·이상치 조정(IQR)' : 'Temp S_vol';
+      $('#mktSrc').textContent = `유사기업 ${r.n}개 평균`;
+    }
+    $('#peerNote').innerHTML = `<table class="res"><tr><th>유사기업</th><th>코드</th><th>Temp S_vol</th><th>1년·IQR</th></tr>${r.rows.map((x) => (x.vol
+      ? `<tr><td>${esc(x.name)}</td><td>${esc(x.code)}</td><td>${(x.vol * 100).toFixed(2)}%</td><td>${x.vol_iqr ? (x.vol_iqr * 100).toFixed(2) + '%' : '-'}</td></tr>`
+      : `<tr><td>${esc(x.name)}</td><td>${esc(x.code)}</td><td colspan="2" class="warnc">${esc(x.error || '실패')}</td></tr>`)).join('')}
+      <tr class="total"><td>평균 (${r.n}개)</td><td></td><td>${r.avg ? (r.avg * 100).toFixed(2) + '%' : '-'}</td><td>${r.avg_iqr ? (r.avg_iqr * 100).toFixed(2) + '%' : '-'}</td></tr></table>`
+      + `<div class="muted">변동성 칸에는 ${useIqr ? '1년·IQR' : 'Temp S_vol'} 평균을 넣었습니다 (위 '변동성 방식' 선택을 따릅니다). Temp DW proxy1~5(FA~FE)·pcode1~5(FM~FQ)로 내보냅니다.</div>`;
+    markStale();
+  } catch (e) { $('#peerNote').innerHTML = `<span class="warnc">유사기업 변동성을 계산하지 못했습니다: ${esc(e.message)}</span>`; }
+  btn.disabled = false;
+}
+
 /* ------------------------------------------------------------ 7. 평가·내보내기 */
 function payload() {
   const f = st.fields;
@@ -611,7 +835,8 @@ function payload() {
       appraiser: $('#appraiser').value.trim(), val_date: $('#val_date').value, credit_grade: $('#credit_grade').value.trim(),
       steps_per_year: Number($('#steps_per_year').value) || 52, par_value: num($('#par_value').value),
       issue_basis: $('#issue_basis').checked, refix_effect: refix ? 'Y' : 'N', use_tables: $('#use_tables').checked,
-      city: st.city || null,
+      city: st.city || null, key: st.issue.key || null, src: st.issue.src || null,
+      measure_date: measureDate(), peers: st.peers || [],
     },
     fields: f,
     market: { S: num($('#S').value), sigma: num($('#sigma').value),
@@ -639,7 +864,31 @@ async function doValue() {
   busy(false, btn);
 }
 
+function renderResultSO() {
+  const r = st.result.result, i = st.result.info, rep = report();
+  const fvc = rep['옵션1개당'] != null ? rep['옵션1개당'] : num((st.fields['회사FV'] || {}).value);
+  const qL = r['잔여수량'], qG = r['부여수량'];
+  const line = (k, a, b, unit) => {
+    const d = (a != null && b != null) ? a - b : null, pct = (d != null && b) ? d / Math.abs(b) : null;
+    const f = unit === 'mil' ? fmtMil : (v) => fmt(v, 1);
+    return `<tr class="${k.startsWith('옵션') ? 'total' : ''}"><td>${k}</td><td>${a == null ? '' : f(a)}</td><td>${b == null ? '' : f(b)}</td>
+      <td class="${pct != null && Math.abs(pct) > 0.01 ? 'big' : ''}">${d == null ? '' : f(d)}</td><td>${pct == null ? '' : (pct * 100).toFixed(2) + '%'}</td></tr>`;
+  };
+  let h = '<tr><th>구분</th><th>대시보드</th><th>회사·평가사</th><th>차이</th><th>차이율</th></tr>';
+  const typ = isOpt() ? ((st.fields['옵션종류'] || {}).value || 'Put') : 'Call';
+  h += line(isOpt() ? `${typ} 주당 (이항 · Temp SO 시트, 원)` : '옵션 1개당 (이항 · Temp SO, 원)', r['옵션1개당'], fvc);
+  h += line(`블랙숄즈 유럽형 ${typ} (참고, 원)`, r['BS유럽형'], null);
+  if (qL != null) h += line(isOpt() ? `${fmt(qL)}주 총액 (백만)` : `잔여 ${fmt(qL)}개 총액 (백만)`, r['전체가치'], fvc != null ? fvc * qL : null, 'mil');
+  if (qG != null && qG !== qL) h += line(`부여 ${fmt(qG)}개 총액 (백만)`, r['부여분 총액'], fvc != null ? fvc * qG : null, 'mil');
+  $('#resTable').innerHTML = h;
+  $('#resTable').classList.remove('stale');
+  $('#resInfo').textContent = `측정일 ${i.measure_date} · 격자 ${i.N}단계 · 만기까지 ${i.T.toFixed(3)}년 · Rf(만기) ${(i.rf_T * 100).toFixed(3)}%`
+    + ` · 행사 가능 단계 ${i.ex_from}~${i.ex_to} (행사기간 안에서만 조기행사) · u ${i.u}`
+    + (isOpt() ? ` · 할인 ${i.discount} · 만기 행사가 ${fmt(i.strike_T)}원` : '');
+}
+
 function renderResult() {
+  if (optLike()) return renderResultSO();
   const res = st.result.result, rep = report(), face = num((st.fields['잔여총액'] || {}).value) || 0;
   if ($('#issue_basis').checked && face && rep['일반사채'] != null && rep.Put != null) {
     // 발행일 기준(리뷰 양식 1.2): 평가사 값도 전체 = 발행금액, 전환권 = 끼워맞춤
@@ -699,6 +948,7 @@ window.addEventListener('DOMContentLoaded', () => {
   $('#btnSearch').onclick = doSearch;
   $('#q').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
   $('#btnMarket').onclick = loadMarket;
+  $('#btnPeers').onclick = loadPeers;
   $('#btnValue').onclick = doValue;
   $('#btnReview').onclick = () => doExport('review');
   $('#btnDW').onclick = () => doExport('dw');

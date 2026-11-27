@@ -68,8 +68,76 @@ def review_xlsx(st):
     ws["B2"] = f"-평가사 : {m.get('appraiser') or ''}"
     ws["B4"] = "* 하기 재계산 금액을 회사에 회람하는 것은 독립성 훼손위협이 되니 유의하시기 바랍니다. "
     ws["B4"].font = Font(color="B83A3A")
-    ws["B6"] = f"1. {m.get('bd_tm') or ''}{m.get('kind') or 'CB'}"
+    kind = m.get("kind") or "CB"
+    if kind == "OPT":
+        ws["B6"] = f"1. {_v(f, '옵션종류') or 'Put'} 옵션 — {m.get('bd_tm') or ''}"
+    else:
+        ws["B6"] = f"1. {kind} {m.get('bd_tm') or ''}" if kind == "SO" else (
+            f"1. {kind} 제{m.get('bd_tm') or ''}회" if kind in ("RCPS", "CPS") else f"1. {m.get('bd_tm') or ''}{kind}")
     ws["B6"].font = Font(bold=True)
+    if kind in ("SO", "OPT"):
+        _so_block(ws, st, opt=(kind == "OPT"))
+    else:
+        _cb_block(ws, st, rep)
+    _tail(ws, st)
+    _evidence_sheets(wb, st)
+    bio = io.BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
+
+
+def _so_block(ws, st, opt=False):
+    """주식선택권: 1개당 공정가치(이항 · Temp SO 시트)와 회사 주석 공정가치 대조.
+    opt=True: 풋·콜옵션 — 주당 공정가치와 평가사 값 대조 (같은 SO 시트 격자, 할인 Rf/Rd, 행사가 이율)."""
+    m, f, res, rep = st["meta"], st["fields"], st["result"] or {}, st.get("report") or {}
+    typ = _v(f, "옵션종류") or "Put"
+    disc = m.get("discount") or ("Rf" if typ == "Call" else "Rd")
+    if opt:
+        ws["B7"] = f"1.2. 평가기준일 {m.get('val_date') or ''} ({typ}, 할인 {disc})"
+    else:
+        ws["B7"] = f"1.2. 측정일 {m.get('measure_date') or ''} ({_v(f, '결제방식') or '주식결제형'})"
+    ws["B8"] = "* 가정사항"
+    curve = st["curves"].get("rd" if (opt and disc == "Rd") else "rf") or []
+    rf = [x for x in curve if x not in (None, "")]
+    if opt:
+        heads = ["평가기준일", "행사가격", "주가", "변동성(연)", f"할인율({disc})", "행사시작일", "행사종료일", "행사가 이율"]
+        vals = [_date(m.get("val_date")), _v(f, "행사가격"), st["market"].get("S"), st["market"].get("sigma"),
+                (rf[0] / 100 if len(rf) == 1 else "곡선 입력"), _date(_v(f, "행사시작일")), _date(_v(f, "행사종료일")),
+                _v(f, "행사가증가율") or 0]
+    else:
+        heads = ["측정일", "행사가격", "주가", "변동성(연)", "무위험이자율", "행사시작일", "행사종료일", "기대배당"]
+        vals = [_date(m.get("measure_date")), _v(f, "행사가격"), st["market"].get("S"), st["market"].get("sigma"),
+                (rf[0] / 100 if len(rf) == 1 else "곡선 입력"), _date(_v(f, "행사시작일")), _date(_v(f, "행사종료일")), _v(f, "기대배당") or 0]
+    fmts = ["yyyy-mm-dd", "#,##0", "#,##0", "0.00%", "0.00%", "yyyy-mm-dd", "yyyy-mm-dd", "0.00%"]
+    for i, (h, v, fm) in enumerate(zip(heads, vals, fmts)):
+        c = ws.cell(9, 2 + i, h); c.fill = HEAD; c.border = BOX; c.font = Font(bold=True)
+        c = ws.cell(10, 2 + i, v); c.number_format = fm; c.border = BOX
+    for i, h in enumerate(["구분", "대시보드", "회사·평가사", "차이", "차이율"]):
+        c = ws.cell(12, 2 + i, h); c.fill = HEAD; c.border = BOX; c.font = Font(bold=True)
+    per_co = rep.get("옵션1개당") if rep.get("옵션1개당") is not None else _v(f, "회사FV")
+    qL, qG = res.get("잔여수량"), res.get("부여수량")
+    if opt:
+        rows = [(f"{typ} 주당 (원, 이항·Temp SO 시트)", res.get("옵션1개당"), per_co, "#,##0.0"),
+                (f"블랙숄즈 유럽형 {typ} (참고, 원)", res.get("BS유럽형"), None, "#,##0.0")]
+    else:
+        rows = [("옵션 1개당 (원, 이항·Temp SO)", res.get("옵션1개당"), per_co, "#,##0.0"),
+                ("블랙숄즈 유럽형 (참고, 원)", res.get("BS유럽형"), None, "#,##0.0")]
+    if qL is not None:
+        rows.append((f"{qL:,.0f}주 총액" if opt else f"잔여 {qL:,.0f}개 총액", res.get("전체가치"),
+                     per_co * qL if per_co is not None else None, MIL))
+    if qG is not None and qG != qL:
+        rows.append((f"부여 {qG:,.0f}개 총액", res.get("부여분 총액"), per_co * qG if per_co is not None else None, MIL))
+    for r, (k, a, b, fm) in enumerate(rows, start=13):
+        d = (a - b) if (a is not None and b is not None) else None
+        row = [k, a, b, d, (d / b) if (d is not None and b) else None]
+        for i, v in enumerate(row):
+            c = ws.cell(r, 2 + i, v); c.border = BOX
+            c.number_format = ["@", fm, fm, fm, "0.00%"][i]
+    ws.column_dimensions["B"].width = 30
+
+
+def _cb_block(ws, st, rep):
+    m, f, res = st["meta"], st["fields"], st["result"]
     basis = "발행일(전체FV 발행금액 기준)" if m.get("issue_basis") else "평가기준일"
     ws["B7"] = f"1.2. {basis}"
     ws["B8"] = "* 가정사항"
@@ -95,6 +163,9 @@ def review_xlsx(st):
         for i, v in enumerate(row):
             c = ws.cell(r, 2 + i, v); c.border = BOX
             c.number_format = ["@", "#,##0", MIL, MIL, MIL, "0.00%", "@", "@"][i]
+
+
+def _tail(ws, st):
     ws["B20"] = "Con)"
     ws["B20"].font = Font(bold=True)
     ws["B21"] = st.get("conclusion") or "특이사항 없음."
@@ -108,6 +179,9 @@ def review_xlsx(st):
         r += 1
     ws.cell(r + 1, 2, "※ FV는 대시보드 참고 추정치입니다. 확정 값은 Temp_v530 계산 결과로 바꿔 적으세요.").font = Font(italic=True, color="737B8A")
 
+
+def _evidence_sheets(wb, st):
+    f = st["fields"]
     ev = wb.create_sheet("입력근거")
     ev.sheet_view.showGridLines = False
     for i, (h, w) in enumerate([("항목", 16), ("값", 16), ("출처", 10), ("공시 접수번호", 16), ("원문 항목", 18), ("근거 문구(원문 형광펜 부분)", 70), ("메모", 40), ("DART 링크", 50)]):
@@ -150,9 +224,6 @@ def review_xlsx(st):
                     c.fill = bad
         for col, w in zip("ABCDEF", (22, 20, 20, 8, 24, 28)):
             ws3.column_dimensions[col].width = w
-    bio = io.BytesIO()
-    wb.save(bio)
-    return bio.getvalue()
 
 
 DW_HEAD = {
@@ -166,7 +237,8 @@ DW_HEAD = {
     "AU": "Refix최소(일반or)", "AV": "Put초일", "AW": "배당가능초일", "AX": "계약Put초일", "AY": "Put말일", "AZ": "YTP",
     "BA": "YTP복리", "BB": "Put연회수", "BC": "Call초일", "BD": "Call말일", "BE": "YTC", "BF": "YTC복리", "BG": "Call연회수",
     "BH": "Call한도", "BI": "Call순위", "BJ": "Call3자배정", "DS": "주가", "DT": "변동성", "DU": "신용등급", "EL": "R신용등급",
-    "FA": "proxy1", "FM": "pcode1",
+    "FA": "proxy1", "FB": "proxy2", "FC": "proxy3", "FD": "proxy4", "FE": "proxy5",
+    "FM": "pcode1", "FN": "pcode2", "FO": "pcode3", "FP": "pcode4", "FQ": "pcode5",
 }
 RF_COLS = ["DV", "DW", "DX", "DY", "DZ", "EA", "EB", "EC", "ED", "EE", "EF", "EG", "EH", "EI", "EJ", "EK"]
 RD_COLS = ["EM", "EN", "EO", "EP", "EQ", "ER", "ES", "ET", "EU", "EV", "EW", "EX", "EY", "EZ"]
@@ -200,8 +272,102 @@ def _sched_table(sched, start, end, per_year):
     return [r for _, r in got], None
 
 
+def _flat16(c):
+    xs = [x for x in (c or []) if x not in (None, "")]
+    return [xs[0]] * 16 if len(xs) == 1 else (c or [])
+
+
+def _proxies(row, m):
+    """유사기업(비상장 변동성) → Temp proxy1~5(FA~FE)·pcode1~5(FM~FQ). 없으면 상장사 자기 자신."""
+    peers = m.get("peers") or []
+    if peers:
+        for i, pr in enumerate(peers[:5]):
+            row[get_column_letter(column_index_from_string("FA") + i)] = pr.get("name")
+            row[get_column_letter(column_index_from_string("FM") + i)] = pr.get("code")
+    elif m.get("stock_code"):
+        row["FA"], row["FM"] = m["company"], m["stock_code"]
+
+
+def _so_dw_row(st):
+    """주식선택권 → Temp DW (상품 'SO'). Temp SO 시트가 쓰는 열: 전환초일·전환말일(AQ·AR) = 행사기간,
+    현조정행사가격(AN) = 행사가격, 만기일(AG) = 행사종료일, 주가(DS)·변동성(DT)·Rf(DV~EK)."""
+    m, f, rep = st["meta"], st["fields"], st.get("report") or {}
+    md = _date(m.get("measure_date") or _v(f, "부여일") or m["val_date"])
+    qty = _v(f, "잔여수량") or _v(f, "부여수량")
+    k = _v(f, "행사가격")
+    per = rep.get("옵션1개당") if rep.get("옵션1개당") is not None else _v(f, "회사FV")
+    row = {
+        "A": f"{m['company']}SO{m.get('bd_tm') or ''}_{md.strftime('%y%m%d')}",
+        "B": m.get("target_company") or m["company"], "C": m["company"], "D": m.get("city"), "E": "SO", "F": m.get("bd_tm"),
+        "G": md, "I": m.get("appraiser"), "K": dt.date.today(),
+        "N": per * qty if (per is not None and qty) else None,
+        "AB": qty * k if (qty and k) else None, "AF": _date(_v(f, "부여일")), "AG": _date(_v(f, "행사종료일")),
+        "AH": 0, "AJ": 0, "AK": 1, "AL": "연복리", "AN": k, "AO": k,
+        "AQ": _date(_v(f, "행사시작일")), "AR": _date(_v(f, "행사종료일")), "AS": 12, "AT": "일반",
+        "DS": st["market"].get("S"), "DT": st["market"].get("sigma"),
+    }
+    row["AE"], row["AD"], row["AC"] = row["AB"], row["AN"], qty
+    for col, v in zip(RF_COLS, _flat16(st["curves"].get("rf"))):
+        row[col] = v
+    _proxies(row, m)
+    row["_notes"] = ["SO: 행사기간 = 전환초일·전환말일(AQ·AR), 행사가격 = 현조정행사가격(AN), 수량 = 발행주수(AC). "
+                     "Temp에서 SO 계산으로 확인하세요."]
+    return row
+
+
+def _opt_dw_row(st):
+    """풋·콜옵션(주식 대상) → Temp DW (상품 'SO', Temp SO 시트로 계산).
+    Temp 규칙: 옵션유형(Input O34) = 명칭(A)에 'Put'이 있으면 Put, 아니면 Call · SO후속(O35) = Put이면 'Y'(Rd 할인), Call이면 'N'(Rf).
+    기초자산(Input M35) '주식' = 행사가 고정: 행사가 = 현조정행사가격(AN), 행사기간 = 전환초일·전환말일(AQ·AR).
+    기초자산 'CB' = 행사가가 Put(또는 Call) 일정을 따라 커짐: 발행일(AF) = 이율 기산일, 발행액(권)(AD) = 행사가(1주 단위),
+    YTP(AZ)·YTC(BE) = 행사가 이율, Put·Call 기간 = 행사기간."""
+    m, f, rep = st["meta"], st["fields"], st.get("report") or {}
+    vd = _date(m["val_date"])
+    typ = _v(f, "옵션종류") or "Put"
+    is_put = typ != "Call"
+    k, qty = _v(f, "행사가격"), _v(f, "수량")
+    rate, comp = _v(f, "행사가증가율") or 0, _v(f, "행사가복리") or "연복리"
+    s, e = _date(_v(f, "행사시작일")) or vd, _date(_v(f, "행사종료일"))
+    base = _date(_v(f, "행사가기산일")) or vd
+    per = rep.get("옵션1개당")
+    row = {
+        "A": f"{m['company']}{typ}{m.get('bd_tm') or ''}_{vd.strftime('%y%m%d')}",
+        "B": m.get("target_company") or m["company"], "C": m["company"], "D": m.get("city"), "E": "SO", "F": m.get("bd_tm"),
+        "G": vd, "I": m.get("appraiser"), "K": dt.date.today(),
+        "N": per * qty if (per is not None and qty) else None,
+        "AB": qty * k if (qty and k) else None, "AF": base, "AG": e,
+        "AH": 0, "AJ": 0, "AK": 1, "AL": "연복리", "AN": k, "AO": k,
+        "AQ": s, "AR": e, "AS": 12, "AT": "일반",
+        "DS": st["market"].get("S"), "DT": st["market"].get("sigma"), "DU": m.get("credit_grade"), "EL": m.get("credit_grade"),
+    }
+    row["AE"], row["AD"], row["AC"] = row["AB"], k, qty
+    notes = [f"{typ} 옵션: 명칭(A)에 '{typ}'를 넣었습니다 — Temp는 명칭으로 옵션유형을 정합니다 (Input O34)."
+             + (" Put이라 Temp는 Rd로 할인합니다 (SO후속=Y)." if is_put else " Call이라 Temp는 Rf로 할인합니다 (SO후속=N).")]
+    if rate:
+        if is_put:
+            row.update({"AX": s, "AY": e, "AZ": rate, "BA": comp, "BB": 12, "AV": s})
+        else:
+            row.update({"BC": s, "BD": e, "BE": rate, "BF": comp, "BG": 12, "BH": 1, "BI": "선순위", "BJ": "N"})
+        notes.append(f"행사가에 연 {rate:.2%}({comp})가 붙습니다 → Temp Input!M35(so기초자산)를 'CB'로 두세요: "
+                     f"{'Put' if is_put else 'Call'} 일정(월 1회, 기산일 = 발행일 AF)이 행사가가 됩니다. "
+                     "대시보드는 행사기간 안 매 단계 행사를 허용하므로 Temp(일정일에만 행사)보다 조금 클 수 있습니다.")
+    else:
+        notes.append("행사가 고정 → Temp Input!M35(so기초자산)를 '주식'으로 두세요 (행사가 = AN, 행사기간 = AQ·AR).")
+    for col, v in zip(RF_COLS, _flat16(st["curves"].get("rf"))):
+        row[col] = v
+    for col, v in zip(RD_COLS, _flat16(st["curves"].get("rd"))[:14]):
+        row[col] = v
+    _proxies(row, m)
+    row["_notes"] = notes
+    return row
+
+
 def dw_row(st):
     m, f, rep = st["meta"], st["fields"], st.get("report") or {}
+    if (m.get("kind") or "CB") == "SO":
+        return _so_dw_row(st)
+    if (m.get("kind") or "CB") == "OPT":
+        return _opt_dw_row(st)
     vd = _date(m["val_date"])
     put_first = _v(f, "Put초일")
     o, p_, q = rep.get("일반사채"), rep.get("Put"), rep.get("전환권")
@@ -224,14 +390,21 @@ def dw_row(st):
         "BH": _v(f, "Call한도") if _v(f, "Call초일") else None, "BI": _v(f, "Call순위") or "선순위",
         "BJ": _v(f, "Call3자배정") or "N",
         "DS": st["market"].get("S"), "DT": st["market"].get("sigma"), "DU": m.get("credit_grade"), "EL": m.get("credit_grade"),
-        "FA": m["company"], "FM": m.get("stock_code"),
     }
+    _proxies(row, m)
     if (_v(f, "상환활증방식") == "고정율") and _v(f, "RedemR"):
         row["AM"] = _v(f, "RedemR")
     row["AE"] = row["AB"]
     row["AD"] = row["AN"]
     row["AC"] = (row["AE"] / row["AD"]) if row["AE"] and row["AD"] else None
     row["AV"] = row["AX"]
+    if (m.get("kind") or "CB") in ("RCPS", "CPS"):
+        row["AI"] = _v(f, "액면가") or m.get("par_value")
+        row["AW"] = _date(_v(f, "배당가능초일"))
+        if row["AW"] and row["AX"]:
+            row["AV"] = max(row["AW"], row["AX"])
+        if _v(f, "상하향조정") == "공모가조정" and _v(f, "공모가하한"):
+            row["AU"] = f"공모가*{round(_v(f, '공모가하한') * 100)}%"
     notes = []
     vd_iso = m["val_date"]
     if _v(f, "Call말일") and _v(f, "Call말일") < vd_iso:
@@ -244,7 +417,7 @@ def dw_row(st):
         if note:
             notes.append("Call " + note)
     if _v(f, "Put말일") and _v(f, "Put말일") < vd_iso:
-        for c in ("AX", "AY", "AZ", "BA", "BB", "AV"):
+        for c in ("AX", "AY", "AZ", "BA", "BB", "AV", "AW"):
             row[c] = None
     elif m.get("use_tables", True):
         tbl, note = _sched_table(_v(f, "Put일정"), row["AX"], row["AY"], row["BB"])
@@ -252,9 +425,9 @@ def dw_row(st):
             row.update(dict(zip(PT_COLS, tbl)))
         if note:
             notes.append("Put " + note)
-    for col, v in zip(RF_COLS, st["curves"]["rf"]):
+    for col, v in zip(RF_COLS, _flat16(st["curves"]["rf"])):
         row[col] = v
-    for col, v in zip(RD_COLS, st["curves"]["rd"]):
+    for col, v in zip(RD_COLS, _flat16(st["curves"]["rd"])[:14]):
         row[col] = v
     row["_notes"] = notes
     return row
