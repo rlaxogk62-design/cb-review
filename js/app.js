@@ -218,8 +218,210 @@ async function loadIssue(it, keepManual = false) {
     startWatch();
   } catch (e) { toast(e.message, true, 8000); busy(false); return false; }
   busy(false);
+  loadBorrow();
   await autoMarketData();
   return true;
+}
+
+/* ------------------------------------------------------------ 할인율 참고: 주석 차입이자율 · 발행시점 역산 스프레드 */
+const pct2 = (x) => (x == null ? '-' : `${(+x).toFixed(2)}%`);
+async function loadBorrow() {
+  const el = $('#borrowLine');
+  el.textContent = ''; el.title = ''; st.borrow = null;
+  if (!st.issue || isSO() || isOpt()) return;
+  try {
+    const r = await api(`/api/borrow?corp_code=${st.corp.corp_code}&val_date=${$('#val_date').value}`);
+    st.borrow = r;
+    if (!r.n) { el.textContent = '주석 차입금 이자율: 찾지 못함'; return; }
+    el.textContent = `주석 차입이자율 ${pct2(r.min)} ~ ${pct2(r.max)} (중앙 ${pct2(r.median)} · ${r.n}건 · ${r.report.report_nm})`;
+    el.title = r.items.map((x) => `${x.kind || ''} ${x.lender} ${x.rate}%${x.amount ? ' · ' + fmt(x.amount) : ''}`).join('\n');
+  } catch (e) { el.textContent = ''; }
+}
+async function doImplied() {
+  const box = $('#spreadBox');
+  box.innerHTML = '<span class="muted">발행일 주가·변동성·국고채로 발행가에 맞는 스프레드를 역산하는 중…</span>';
+  try {
+    const r = await api('/api/implied', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload()) });
+    if (r.spread == null) { box.innerHTML = `<span class="warnc">${esc(r.why || '역산하지 못했습니다.')}</span>`; return; }
+    let h = `<b>내재 스프레드 Rf + ${r.spread.toFixed(2)}%p</b> — 발행일(${esc(r.issue_date)}) 이론가치가 발행가와 같아지는 Rd − Rf`
+      + `<div class="muted">${esc(r.stock)} · ${esc(r.rf_src)}${(r.notes || []).map((n) => ' · ' + esc(n)).join('')}</div>`;
+    if (r.grade_spread != null) {
+      const d = r.spread - r.grade_spread;
+      h += `<div>지금 Rd 곡선(${esc($('#credit_grade').value || '입력값')})의 잔존 ${r.T.toFixed(1)}년 스프레드 ${r.grade_spread.toFixed(2)}%p → `
+        + (Math.abs(d) < 0.5 ? '내재 스프레드와 비슷합니다.'
+          : d > 0 ? `내재보다 ${d.toFixed(2)}%p 낮음 — 이 곡선으로 평가하면 발행시점 이론가치가 발행가보다 높게 나옵니다.`
+            : `내재보다 ${(-d).toFixed(2)}%p 높음 — 이 곡선으로 평가하면 발행시점 이론가치가 발행가보다 낮게 나옵니다.`) + '</div>';
+    }
+    if (st.borrow && st.borrow.n) h += `<div class="muted">참고 — 주석 차입이자율 ${pct2(st.borrow.min)} ~ ${pct2(st.borrow.max)}</div>`;
+    if (r.rd) h += `<button id="btnUseSpread" class="ghost">이 스프레드로 Rd 채우기 (평가기준일 Rf + ${r.spread.toFixed(2)}%p)</button>`;
+    box.innerHTML = h;
+    if (r.rd) {
+      $('#btnUseSpread').onclick = () => {
+        $('#rd').value = r.rd.join('\t');
+        curveCount(); markStale();
+        $('#curveNote').textContent = `Rd = 평가기준일 Rf + 발행시점 내재 스프레드 ${r.spread.toFixed(2)}%p (등급 곡선 아님 — Temp DU·EL 등급코드는 따로 확인).`;
+        toast('Rd를 내재 스프레드 곡선으로 바꿨습니다. [평가 계산]을 다시 누르세요.');
+      };
+    }
+  } catch (e) { box.innerHTML = `<span class="warnc">${esc(e.message)}</span>`; }
+}
+
+/* ------------------------------------------------------------ 탭 */
+function showTab(name) {
+  document.querySelectorAll('#tabs .tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
+  document.querySelector('main:not(#screenTab)').classList.toggle('hidden', name === 'screen');
+  $('#screenTab').classList.toggle('hidden', name !== 'screen');
+  if (name === 'screen') { if (location.hash !== '#screen') history.replaceState(null, '', '#screen'); scInit(); }
+  else if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+  window.scrollTo(0, 0);
+}
+
+/* ------------------------------------------------------------ 딜 스크리닝 */
+const sc = { rows: [], sort: { key: 'issue_value_pct', dir: -1 }, running: false, stop: false, ready: false, ras: null };
+const SC_COLS = [
+  ['corp_name', '회사', 'l'], ['tm', '상품·회차', 'l'], ['status', '상태', 'st'],
+  ['issue_date', '발행일', 'd'], ['maturity', '만기', 'd'], ['face', '잔액(억)', 'eok'], ['private', '사모', 'l'],
+  ['conv_price', '전환가', 'n0'], ['S', '주가', 'n0'], ['par', '패리티', 'p1'], ['sigma', '변동성', 'v'],
+  ['ytm', 'YTM', 'r'], ['ytp', 'YTP', 'r'], ['refix', '리픽싱', 'l'], ['call_ratio', 'Call', 'r0'], ['grade', '신용 가정', 'l'],
+  ['value_pct', '이론가치', 'p1'], ['bond_pct', '일반사채', 'p1'], ['opt_pct', '옵션', 'p1'],
+  ['issue_value_pct', '발행시점 이론가치', 'up'], ['implied_spread', '내재 스프레드', 'sp'], ['grade_spread', '등급 스프레드', 'sp'],
+  ['spread_gap', '차이', 'gap'], ['note', '비고', 'nt'],
+];
+function scDerive(r) {
+  r.tm = `${r.kind || ''} ${r.kind === 'RCPS' || r.kind === 'CPS' ? (r.bd_tm || '') : (r.bd_tm ? r.bd_tm + '회' : '')}`;
+  r.par = r.parity != null ? r.parity : r.issue_parity;
+  r.opt_pct = [r.conv_pct, r.put_pct, r.call_pct].some((x) => x != null) ? (r.conv_pct || 0) + (r.put_pct || 0) + (r.call_pct || 0) : null;
+  r.spread_gap = r.implied_spread != null && r.grade_spread != null ? r.implied_spread - r.grade_spread : null;
+  r.note = (r.notes || []).join(' / ') + (r.grade_src ? (r.notes && r.notes.length ? ' / ' : '') + r.grade_src : '');
+  if (r.status === 'ok') r.status = '';
+  return r;
+}
+function scCell(r, [k, , t]) {
+  const v = r[k];
+  const n = (x, d) => (x == null || x === '' ? '' : (+x).toLocaleString('ko-KR', { minimumFractionDigits: d, maximumFractionDigits: d }));
+  switch (t) {
+    case 'l': return `<td class="l">${esc(v == null ? '' : String(v))}</td>`;
+    case 'st': return `<td class="st">${esc(v || '')}</td>`;
+    case 'nt': return `<td class="nt">${esc(v || '')}</td>`;
+    case 'd': return `<td>${esc(v || '')}</td>`;
+    case 'eok': return `<td>${v == null ? '' : n(v / 1e8, 0)}</td>`;
+    case 'n0': return `<td>${n(v, 0)}</td>`;
+    case 'p1': return `<td>${n(v, 1)}</td>`;
+    case 'v': return `<td>${v == null ? '' : n(v * 100, 1) + '%'}</td>`;
+    case 'r': return `<td>${v == null ? '' : n(v * 100, 2) + '%'}</td>`;
+    case 'r0': return `<td>${v == null ? '' : n(v * 100, 0) + '%'}</td>`;
+    case 'up': return `<td class="${v == null ? '' : v >= 100 ? 'up' : 'dn'}">${n(v, 1)}</td>`;
+    case 'sp': return `<td>${v == null ? '' : n(v, 2) + '%p'}</td>`;
+    case 'gap': return `<td class="${v == null ? '' : v > 0 ? 'up' : 'dn'}">${v == null ? '' : (v > 0 ? '+' : '') + n(v, 2) + '%p'}</td>`;
+    default: return `<td>${esc(v == null ? '' : String(v))}</td>`;
+  }
+}
+function scRender() {
+  const flt = $('#scFilter').value.trim();
+  const only = $('#scOnlyOk').checked;
+  let rows = sc.rows.filter((r) => (!only || !r.status || r.status === '발행 예정') && (!flt || (r.corp_name || '').includes(flt)));
+  const { key, dir } = sc.sort;
+  rows = rows.slice().sort((a, b) => {
+    const x = a[key], y = b[key];
+    if (x == null && y == null) return 0;
+    if (x == null) return 1;
+    if (y == null) return -1;
+    return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y), 'ko')) * dir;
+  });
+  sc.view = rows;
+  $('#scTable').innerHTML = `<tr>${SC_COLS.map(([k, lab, t]) => `<th data-k="${k}" class="${['l', 'st', 'nt'].includes(t) ? 'l' : ''}${k === key ? ' sorted' : ''}">${lab}${k === key ? (dir > 0 ? ' ▲' : ' ▼') : ''}</th>`).join('')}</tr>`
+    + rows.map((r, i) => `<tr data-i="${i}">${SC_COLS.map((c) => scCell(r, c)).join('')}</tr>`).join('');
+  $('#scCount').textContent = `${rows.length}건 표시 · 전체 ${sc.rows.length}건`;
+}
+function scInit() {
+  if (sc.ready) return;
+  sc.ready = true;
+  $('#scVd').value = new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+  $('#scGrade').innerHTML = GRADES.map((g) => `<option ${g === 'B+' ? 'selected' : ''}>${g}</option>`).join('');
+  if (window.CBR_WEB) {
+    $('#scNiceWrap').classList.add('hidden');
+    $('#scCurves').classList.remove('hidden');
+    try { const c = JSON.parse(localStorage.getItem('curves') || '{}'); $('#scRf').value = c.rf || ''; $('#scRd').value = c.rd || ''; } catch (e) { /* 무시 */ }
+  }
+  $('#scStart').onclick = scRun;
+  $('#scStop').onclick = () => { sc.stop = true; $('#scProg').textContent += ' — 중지하는 중…'; };
+  $('#scCsv').onclick = scCsv;
+  $('#scFilter').addEventListener('input', scRender);
+  $('#scOnlyOk').addEventListener('change', scRender);
+  $('#scTable').addEventListener('click', (e) => {
+    const th = e.target.closest('th');
+    if (th) { const k = th.dataset.k; sc.sort = { key: k, dir: sc.sort.key === k ? -sc.sort.dir : (['corp_name', 'tm', 'status', 'grade', 'note', 'private', 'refix'].includes(k) ? 1 : -1) }; scRender(); return; }
+    const tr = e.target.closest('tr[data-i]');
+    if (tr) scOpen(sc.view[+tr.dataset.i]);
+  });
+  scRender();
+}
+const scSplit = (id) => $(id).value.trim().split(/[\s,]+/).filter(Boolean).map(Number);
+async function scRun() {
+  if (sc.running) return;
+  const vd = $('#scVd').value;
+  const kinds = [...document.querySelectorAll('.scKind:checked')].map((x) => x.value);
+  if (!vd || !kinds.length) { toast('평가기준일과 상품을 고르세요.', true); return; }
+  const since = new Date(vd); since.setMonth(since.getMonth() - Number($('#scMonths').value));
+  const sinceS = since.toISOString().slice(0, 10);
+  const base = { val_date: vd, since: sinceS, kinds, at_issue: $('#scIssue').checked,
+    credit: { mode: $('#scNice').checked ? 'nice' : 'fixed', fallback: $('#scGrade').value } };
+  if (window.CBR_WEB) {
+    base.rf = scSplit('#scRf'); base.rd = scSplit('#scRd');
+    if (base.rf.length < 2 || base.rd.length < 2) { toast('외부 웹은 Rf·Rd 곡선을 붙여넣어야 합니다 (신용 가정 등급의 곡선).', true, 6000); return; }
+  }
+  sc.running = true; sc.stop = false; sc.rows = [];
+  $('#scStart').disabled = true; $('#scStop').disabled = false;
+  $('#scProg').textContent = `${sinceS} ~ ${vd} 발행결정 공시 목록을 받는 중…`;
+  scRender();
+  const t0 = Date.now();
+  try {
+    const u = await api(`/api/screen/universe?since=${sinceS}&until=${vd}&kinds=${kinds.join(',')}`);
+    const queue = u.corps.slice();
+    let done = 0;
+    const total = queue.length;
+    const prog = () => { $('#scProg').textContent = `${done}/${total}개 회사 (공시 ${u.n_filings}건) · ${Math.round((Date.now() - t0) / 1000)}초`; };
+    prog();
+    const worker = async () => {
+      while (queue.length && !sc.stop) {
+        const corp = queue.shift();
+        try {
+          const rows = await api('/api/screen/corp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...base, corp }) });
+          rows.forEach((r) => sc.rows.push(scDerive(r)));
+        } catch (e) {
+          sc.rows.push(scDerive({ corp_name: corp.corp_name, corp_code: corp.corp_code, status: '평가 불가: ' + e.message, notes: [] }));
+        }
+        done += 1; prog(); scRender();
+      }
+    };
+    await Promise.all(Array.from({ length: window.CBR_WEB ? 1 : 3 }, worker));
+    $('#scProg').textContent += sc.stop ? ' — 중지됨' : ' — 완료';
+  } catch (e) { toast(e.message, true, 8000); $('#scProg').textContent = ''; }
+  sc.running = false;
+  $('#scStart').disabled = false; $('#scStop').disabled = true;
+}
+function scCsv() {
+  if (!sc.view || !sc.view.length) { toast('저장할 결과가 없습니다.', true); return; }
+  const raw = (r, k) => (r[k] == null ? '' : String(r[k]).replace(/"/g, '""'));
+  const lines = [SC_COLS.map(([, lab]) => lab).join(',')].concat(sc.view.map((r) => SC_COLS.map(([k]) => `"${raw(r, k)}"`).join(',')));
+  const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `딜스크리닝_${$('#scVd').value}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+async function scOpen(r) {
+  if (!r || !r.corp_code) return;
+  showTab('review');
+  $('#val_date').value = $('#scVd').value || $('#val_date').value;
+  await pickCorp({ corp_code: r.corp_code, corp_name: r.corp_name, stock_code: r.stock_code });
+  const it = (st.issues || []).find((x) => x.rcept_no === r.rcept_no && (r.key ? x.key === r.key : true))
+    || (st.issues || []).find((x) => x.kind === r.kind && String(x.bd_tm) === String(r.bd_tm));
+  if (!it) { toast('회차 목록에서 이 회차를 찾지 못했습니다. 목록에서 직접 고르세요.', true); return; }
+  const card = [...document.querySelectorAll('#issueList .issue')][st.issues.indexOf(it)];
+  if (card) card.classList.add('on');
+  loadIssue(it);
 }
 
 /* ------------------------------------------------------------ 상품별 화면 (CB·RCPS·SO) */
@@ -235,6 +437,8 @@ function measureDate() {
 function applyKindLayout(it, prevKind) {
   const so = it.kind === 'SO';
   $('#peerBox').classList.toggle('hidden', !unlisted());
+  $('#spreadWrap').classList.toggle('hidden', so || it.kind === 'OPT');
+  $('#spreadBox').innerHTML = '';
   $('#soNote').classList.toggle('hidden', !(so || it.kind === 'OPT'));
   if (it.kind === 'OPT') {
     $('#soNote').textContent = '풋·콜옵션: 행사가·이율·기산일·행사기간·수량을 계약서로 넣으세요. Temp SO 시트처럼 Put은 Rd, Call은 Rf로 할인합니다 (SO후속 — 할인 칸에서 바꿀 수 있음). '
@@ -958,6 +1162,9 @@ window.addEventListener('DOMContentLoaded', () => {
   ['#S', '#sigma', '#steps_per_year'].forEach((id) => $(id).addEventListener('change', () => { st.market.source = '수동 입력'; markStale(); }));
   $('#val_date').addEventListener('change', () => { if (st.issue) loadIssue(st.issue, true); });
   $('#btnCurves').onclick = async () => { st.gradeManual = false; await loadCredit(); await loadCurves(); };
+  $('#btnImplied').onclick = doImplied;
+  document.querySelectorAll('#tabs .tab').forEach((b) => { b.onclick = () => showTab(b.dataset.tab); });
+  if (location.hash === '#screen') showTab('screen');
   $('#placement').addEventListener('change', async () => { st.gradeManual = false; await loadCredit(); await loadCurves(); });
   $('#credit_grade').addEventListener('change', () => { st.gradeManual = true; loadCurves(); renderAssume(); });
   ['#period', '#window'].forEach((id) => $(id).addEventListener('change', loadMarket));

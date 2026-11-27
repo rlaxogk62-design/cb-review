@@ -1084,6 +1084,60 @@ def _so_blocks(rc, report_nm="", date=None):
         return out
 
 
+def _rate_pct(x):
+    """'4.8238%' · '연 7.48%' · '0.0275'(범위 표의 소수) → 연 %. 'CD+1.5' 같은 변동금리는 None."""
+    t = (x or "").replace(",", "").strip()
+    m = re.fullmatch(r"(?:연\s*)?(\d{1,2}(?:\.\d+)?)\s*%?", t)
+    if not m:
+        return None
+    v = float(m.group(1))
+    if "%" not in t and v < 1:
+        v *= 100
+    return round(v, 4) if 0.3 <= v <= 30 else None
+
+
+def borrow_rates(rc):
+    """정기보고서 주석의 차입금 이자율 — 차입처별 행('4.82%')과 '이자율 범위' 표(0.0275~0.0748).
+    사채 표(CB·BW 표면이율)는 차입원가가 아니므로 뺀다. 연결·별도 주석 중복은 한 번만."""
+    out, seen = [], set()
+    for t in xml_tables(rc):
+        rows = t["rows"]
+        body = " ".join(c["t"] for r in rows for c in r)
+        if "이자율" not in body or not re.search(r"차입|금융기관|은행", body):
+            continue
+        if re.search(r"발행회사|증권종류|표시\s*이자율|전환사채|신주인수권|교환사채|회사채", body):
+            continue
+        head = " ".join(c["t"] for c in rows[0])
+        kind_all = "장기" if "장기" in head else ("단기" if "단기" in head else "")
+        for r in rows:
+            cells = [c["t"].strip() for c in r]
+            lab = cells[0] if cells else ""
+            if re.search(r"차입금.*이자율", lab) and len(cells) >= 3:
+                lo, hi = _rate_pct(cells[1]), _rate_pct(cells[2])
+                for v in (lo, hi):
+                    if v is not None:
+                        key = ("범위", lab, v)
+                        if key not in seen:
+                            seen.add(key)
+                            out.append({"kind": "장기" if "장기" in lab else "단기", "lender": "이자율 범위", "rate": v, "amount": None})
+                continue
+            rates = [_rate_pct(x) for x in cells if re.search(r"%", x)]
+            rates = [v for v in rates if v is not None]
+            if not rates:
+                continue
+            lender = next((x for x in cells if re.search(r"은행|금융|캐피탈|증권|보험|공사|공단|진흥|기금|저축|\(주\)|㈜|농협|수협", x)), "")
+            amts = [num(x) for x in cells if re.fullmatch(r"\(?[\d,]{4,}\)?", x)]
+            kind = "장기" if any("장기" in x for x in cells) else ("단기" if any("단기" in x for x in cells) else kind_all)
+            key = (lender, rates[0], amts[0] if amts else None)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"kind": kind, "lender": lender or (cells[1] if len(cells) > 1 else ""), "rate": rates[0], "amount": amts[0] if amts else None})
+    vals = sorted(x["rate"] for x in out)
+    return {"items": out[:40], "n": len(vals), "min": vals[0] if vals else None, "max": vals[-1] if vals else None,
+            "median": vals[len(vals) // 2] if vals else None}
+
+
 ALL = ("CB", "BW", "EB", "RCPS", "CPS", "SO", "PUT", "CALL")
 SOURCES = [
     (r"전환주식\s*매수선택권|제3자의\s*전환주식\s*매수선택권", ("RCPS", "CPS", "CALL"), "Call",

@@ -144,3 +144,35 @@ table.assume td:first-child, table.assume th { white-space: nowrap; }
 table.assume td:last-child { white-space: nowrap; font-size: 12px; }
 .card:has(> table.assume) { overflow-x: auto; }
 @media (max-width: 1100px) { .work { grid-template-columns: 1fr; } .right .sticky, .right .doccard { position: static; } #doc { height: 70vh; } }
+
+/* 탭 */
+.tabs { position: sticky; top: 60px; z-index: 9; background: var(--surface); border-bottom: 1px solid var(--line); display: flex; gap: 4px; padding: 0 24px; }
+.tab { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; padding: 10px 14px; color: var(--muted); font-weight: 700; }
+.tab.on { color: var(--ink); border-bottom-color: var(--accent); }
+/* 내재 스프레드 · 차입이자율 */
+.spreadwrap { margin-top: 6px; }
+.spreadrow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.spreadrow .ghost { margin-top: 0; }
+#spreadBox:empty { display: none; }
+#spreadBox { margin-top: 6px; background: var(--info-bg); border-radius: 10px; padding: 8px 12px; font-size: 13px; }
+/* 딜 스크리닝 */
+.grid4 { display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 8px 12px; align-items: end; }
+.kinds { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+label.chk { display: inline-flex; gap: 4px; align-items: center; color: var(--text); font-size: 13px; }
+label.chk input, label.check.inline input { width: auto; }
+label.check.inline { grid-column: auto; margin-left: auto; }
+.scbar { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+.scbar .ghost { margin-top: 0; }
+.scfilter { width: 180px; }
+.scscroll { max-height: calc(100vh - 230px); overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+table.sctable { width: 100%; border-collapse: collapse; font: 12px var(--mono); }
+table.sctable th { position: sticky; top: 0; background: var(--surface-2); color: var(--ink); font: 600 11px var(--sans); padding: 6px; text-align: right;
+  white-space: nowrap; cursor: pointer; border-bottom: 2px solid var(--line-2); }
+table.sctable th.sorted { color: var(--accent); }
+table.sctable td { padding: 5px 6px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.sctable th.l, table.sctable td.l { text-align: left; font-family: var(--sans); }
+table.sctable tr:hover td { background: var(--surface-2); cursor: pointer; }
+table.sctable td.up { color: var(--good); font-weight: 700; } table.sctable td.dn { color: var(--bad); }
+table.sctable td.st { color: var(--muted); font-family: var(--sans); white-space: normal; min-width: 120px; }
+table.sctable td.nt { color: var(--muted); font-family: var(--sans); white-space: normal; min-width: 200px; font-size: 11px; text-align: left; }
+@media (max-width: 1100px) { .grid4 { grid-template-columns: 1fr 1fr; } }

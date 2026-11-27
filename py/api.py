@@ -13,6 +13,7 @@ import engine
 import export
 import market
 import notes
+import screen
 
 try:
     import ras
@@ -420,6 +421,70 @@ JSON = "application/json; charset=utf-8"
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
+def borrow(corp_code, val_date):
+    """평가기준일에 맞는 정기보고서 주석의 차입금 이자율 (Rd 참고값)."""
+    items = dart.disclosures(corp_code)
+    rep = notes.pick_report(items, val_date)
+    if not rep:
+        return {"report": None, "n": 0, "items": []}
+    return {"report": rep, **notes.borrow_rates(rep["rcept_no"])}
+
+
+def implied_for(st):
+    """회차 리뷰: 발행시점 역산 스프레드. 발행일 이론가치(최초 전환가·발행총액) = 발행가가 되는 Rd − Rf를 구해
+    평가기준일 Rf에 더한 Rd 곡선을 돌려준다 (등급을 모르거나 평가사 등급을 점검할 때)."""
+    import copy
+    m = st["meta"]
+    v = {k: (x or {}).get("value") for k, x in st["fields"].items()}
+    iss, mat, vd = v.get("발행일"), v.get("만기일"), m["val_date"]
+    if not iss or not mat:
+        raise ValueError("발행일·만기일이 필요합니다.")
+    md = min(iss, vd)
+    f0 = copy.deepcopy(st["fields"])
+    f0["현조정행사가격"] = {"value": v.get("최초전환가격") or v.get("현조정행사가격")}
+    target = v.get("발행총액") or v.get("잔여총액")
+    f0["잔여총액"] = {"value": target}
+    notes_ = []
+    if m.get("stock_code"):
+        mk = market.stock(m["stock_code"], md, m.get("market"), ras=ras)
+        S, sig, ssrc = mk["price"], mk["vol"], f"{mk['price_date']} 주가 {mk['price']:,.0f}원 · 변동성 {mk['vol']:.1%} ({mk['source']})"
+    else:
+        S = v.get("최초전환가격") or v.get("주당발행가") or v.get("현조정행사가격")
+        sig = st["market"].get("sigma")
+        if not sig:
+            raise ValueError("비상장 — 변동성(유사기업)을 먼저 넣어 주세요.")
+        ssrc = f"비상장 — 발행일 주가 = 최초 전환가 {S:,.0f}원 가정 · 변동성 {sig:.1%}(현재 입력값)"
+        notes_.append("비상장은 발행가가 공정가치(제3자 거래)라는 전제로 주가를 최초 전환가로 둡니다.")
+    rf_now = _flat(st["curves"]["rf"])
+    if ras is not None:
+        c0 = ras.curves(md, None)
+        rf0, rsrc = c0["rf"], f"{c0['rf_date']} 국고채"
+    else:
+        rf0, rsrc = rf_now, "평가기준일 Rf로 근사 (외부 웹은 날짜별 곡선 없음)"
+    s, why = screen.implied_spread(f0, iss, m.get("kind") or "CB", S, sig, rf0, target)
+    out = {"issue_date": iss, "mkt_date": md, "stock": ssrc, "rf_src": rsrc, "spread": s * 100 if s is not None else None,
+           "why": why, "notes": notes_}
+    if s is not None and len([x for x in rf_now if x not in (None, "")]) >= 2:
+        out["rd"] = screen.rd_from_spread(rf_now, s)
+    rd_now = _flat(st["curves"].get("rd") or [])
+    if len([x for x in rd_now if x not in (None, "")]) >= 2 and len([x for x in rf_now if x not in (None, "")]) >= 2:
+        T = engine.yf(dt.date.fromisoformat(vd), dt.date.fromisoformat(mat))
+        out["grade_spread"] = screen._par(engine.RD_TENORS, rd_now, T) - screen._par(engine.RF_TENORS, rf_now, T)
+        out["T"] = T
+    return out
+
+
+def screen_corp(body):
+    """딜 스크리닝: 회사 하나의 기간 안 발행 회차 평가 (화면이 회사별로 차례로 부른다)."""
+    cv = screen.Curves(ras, _flat(body.get("rf") or []) or None, _flat(body.get("rd") or []) or None) if ras is None \
+        else screen.Curves(ras)
+    key = ("screen", body["corp"]["corp_code"], body["val_date"], body["since"], tuple(body.get("kinds") or ()),
+           json.dumps(body.get("credit") or {}, sort_keys=True), bool(body.get("at_issue")),
+           json.dumps([body.get("rf"), body.get("rd")]) if ras is None else "")
+    return screen._memo(key, lambda: screen.value_corp(body["corp"], body["val_date"], body["since"], tuple(body.get("kinds") or ("CB", "BW", "EB")),
+                                                       body.get("credit"), cv, bool(body.get("at_issue")), ras), ttl=1800)
+
+
 def route(method, path, query="", body=None):
     """API 한 건 처리 → (상태코드, 내용, 콘텐츠타입, 추가헤더)."""
     q = {k: v[0] for k, v in parse_qs(query or "").items()}
@@ -460,10 +525,21 @@ def route(method, path, query="", body=None):
             return 200, {**n, "city": city, "asof": g, "code": market.curve_code(g and g["신용등급"], private)}, JSON, None
         if path == "/api/curves":
             return 200, ras.curves(q["val_date"], q.get("grade") or None), JSON, None
+        if path == "/api/borrow":
+            return 200, borrow(q["corp_code"], q.get("val_date")), JSON, None
+        if path == "/api/screen/universe":
+            kinds = tuple((q.get("kinds") or "CB,BW,EB").split(","))
+            return 200, screen.universe(q["since"], q.get("until"), kinds), JSON, None
+        if path == "/api/screen/info":
+            return 200, {"ras": ras is not None}, JSON, None
         if path == "/api/latest":
             return 200, dart.latest(q["corp_code"], int(q.get("days", 45))), JSON, None
     if method == "POST":
         st = json.loads(body or "{}")
+        if path == "/api/implied":
+            return 200, implied_for(st), JSON, None
+        if path == "/api/screen/corp":
+            return 200, screen_corp(st), JSON, None
         if path == "/api/value":
             if st["meta"].get("kind") == "SO":
                 return 200, value_so(st), JSON, None

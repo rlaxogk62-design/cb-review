@@ -1,7 +1,7 @@
 /* 브라우저 안 파이썬(Pyodide) 작업자: 사내 대시보드와 같은 파이썬 코드(dart·engine·export…)를 그대로 돌린다. */
 const PYODIDE = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/';
 importScripts(PYODIDE + 'pyodide.js');
-const PY_FILES = ['dart.py', 'engine.py', 'export.py', 'market.py', 'notes.py', 'api.py', 'boot.py'];
+const PY_FILES = ['dart.py', 'engine.py', 'export.py', 'market.py', 'notes.py', 'screen.py', 'api.py', 'boot.py'];
 
 // 파이썬 쪽 requests 대용이 부르는 동기 GET (작업자 안에서는 동기 XHR을 쓸 수 있다)
 self.syncGet = (url) => {
