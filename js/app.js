@@ -1213,6 +1213,7 @@ window.addEventListener('DOMContentLoaded', () => {
   $('#btnCurves').onclick = async () => { st.gradeManual = false; await loadCredit(); await loadCurves(); };
   $('#btnImplied').onclick = doImplied;
   $('#btnBook').onclick = doBook;
+  $('#btnBook2').onclick = () => { $('#bookCard').scrollIntoView({ behavior: 'smooth', block: 'start' }); doBook(); };
   document.querySelectorAll('#tabs .tab').forEach((b) => { b.onclick = () => showTab(b.dataset.tab); });
   if (location.hash === '#screen') showTab('screen');
   $('#placement').addEventListener('change', async () => { st.gradeManual = false; await loadCredit(); await loadCurves(); });

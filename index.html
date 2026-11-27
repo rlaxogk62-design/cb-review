@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DART 복합금융상품 리뷰 대시보드</title>
-<link rel="stylesheet" href="css/style.css?v=202611271555">
-<link rel="stylesheet" href="css/web.css?v=202611271555">
+<link rel="stylesheet" href="css/style.css?v=202611271710">
+<link rel="stylesheet" href="css/web.css?v=202611271710">
 </head>
 <body>
 <header class="top">
@@ -91,9 +91,16 @@
         </div>
         <div id="niceBox" class="nice"></div>
         <div id="spreadWrap" class="spreadwrap">
-          <div class="spreadrow"><button id="btnImplied" class="ghost">발행시점 역산 스프레드</button>
-            <span id="borrowLine" class="muted"></span></div>
+          <div class="swhead">할인율 근거 — 나이스 등급이 없거나 애매할 때 아래 세 값을 비교해 Rd를 고르세요</div>
+          <div class="swrow"><span class="swno">①</span><span class="swlab">주석 차입이자율</span>
+            <span id="borrowLine" class="muted">회차를 고르면 자동으로 읽습니다</span></div>
+          <div class="swrow"><span class="swno">②</span><span class="swlab">발행시점 역산 스프레드</span>
+            <button id="btnImplied" class="primary sm">역산하기</button>
+            <span class="muted">발행가 = 이론가치가 되는 Rf + x%p</span></div>
           <div id="spreadBox" class="nice"></div>
+          <div class="swrow"><span class="swno">③</span><span class="swlab">장부 대조 (회사 할인율)</span>
+            <button id="btnBook2" class="primary sm">대조하기</button>
+            <span class="muted">주석의 회사 가정·파생상품부채와 비교 — 결과는 바로 아래 '장부 대조' 카드</span></div>
         </div>
         <button id="btnCurves" class="ghost hidden">등급·곡선 다시 불러오기</button>
         <label>Rf 국고채 — Temp DW 시트 DV~EK 16칸 (0.25 0.5 0.75 1 1.5 2 2.5 3 4 5 7 10 15 20 30 50년)
@@ -101,6 +108,13 @@
         <label>Rd 등급별 — EM~EZ 14칸 (0.25 ~ 20년)
           <textarea id="rd" rows="2" placeholder="9.695	10.739	11.781 …"></textarea></label>
         <div class="note" id="curveNote">입력값은 3개월 이표 YTM으로 보고 zero 금리로 부트스트랩합니다.</div>
+      </div>
+
+      <div class="card" id="bookCard">
+        <div class="cardhead"><span class="kicker">장부</span>장부 대조 — 정기보고서 주석의 파생상품부채·평가 가정 <span class="muted" id="bookTag"></span></div>
+        <div class="note">회사가 재무제표에 계상한 공정가치(외부평가 결과)를 같은 보고기간 말 시장자료로 대시보드가 다시 계산한 값과 비교합니다.</div>
+        <button id="btnBook" class="ghost">보고기간 말 기준 재계산·대조</button>
+        <div id="bookBox"></div>
       </div>
 
       <div class="card">
@@ -118,13 +132,6 @@
         <button id="btnValue" class="primary big">평가 계산</button>
         <button id="btnReview2" class="primary" title="계산 전이면 자동으로 계산한 뒤 내려받습니다">리뷰 엑셀 받기</button>
         <button id="btnDW2" class="primary alt">Temp DW 입력용 엑셀 받기</button>
-      </div>
-
-      <div class="card" id="bookCard">
-        <div class="cardhead"><span class="kicker">장부</span>장부 대조 — 정기보고서 주석의 파생상품부채·평가 가정 <span class="muted" id="bookTag"></span></div>
-        <div class="note">회사가 재무제표에 계상한 공정가치(외부평가 결과)를 같은 보고기간 말 시장자료로 대시보드가 다시 계산한 값과 비교합니다.</div>
-        <button id="btnBook" class="ghost">보고기간 말 기준 재계산·대조</button>
-        <div id="bookBox"></div>
       </div>
 
       <div class="card hidden" id="resultCard">
@@ -203,8 +210,8 @@
   </div>
 </main>
 <div id="toast" class="toast hidden"></div>
-<script src="js/config.js?v=202611271555"></script>
-<script src="js/web.js?v=202611271555"></script>
-<script src="js/app.js?v=202611271555"></script>
+<script src="js/config.js?v=202611271710"></script>
+<script src="js/web.js?v=202611271710"></script>
+<script src="js/app.js?v=202611271710"></script>
 </body>
 </html>
