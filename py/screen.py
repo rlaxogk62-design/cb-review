@@ -133,6 +133,10 @@ def implied_spread(fields, val_date, kind, S, sigma, rf, target, lo=-0.03, hi=0.
         return value_state(_state(fields, val_date, kind, S, sigma, rf, rd_from_spread(rf, s)))["전체가치"] - target
 
     flo, fhi = f(lo), f(hi)
+    if abs(flo - fhi) < target * 1e-3:
+        return None, "이론가치가 할인율에 거의 안 움직임 (즉시 Put·짧은 잔존 등) — 역산 의미 없음"
+    if abs(flo) < target * 1e-4:
+        return None, "Call 가격 등에 막혀 낮은 스프레드에서 이론가치가 발행가로 고정 — 내재 스프레드가 하나로 정해지지 않음"
     if flo < 0:
         return None, f"Rd = Rf{lo * 100:+.0f}%p로도 발행가에 못 미침 (발행가가 이론가치보다 높음)"
     if fhi > 0:
