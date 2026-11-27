@@ -160,6 +160,169 @@ def implied_spread(fields, val_date, kind, S, sigma, rf, target, lo=-0.03, hi=0.
     return (lo + hi) / 2, None
 
 
+def _solve(fn, lo, hi, tol):
+    """fn(lo)·fn(hi) 부호가 다를 때 fn(s) = 0 인 s (Illinois 할선법). 아니면 None."""
+    flo, fhi = fn(lo), fn(hi)
+    if flo == 0:
+        return lo
+    if flo * fhi > 0:
+        return None
+    side = 0
+    for _ in range(40):
+        s = (lo * fhi - hi * flo) / (fhi - flo)
+        fs = fn(s)
+        if abs(fs) <= tol or hi - lo < 1e-5:
+            return s
+        if (fs > 0) == (fhi > 0):
+            hi, fhi = s, fs
+            if side == -1:
+                flo /= 2
+            side = -1
+        else:
+            lo, flo = s, fs
+            if side == 1:
+                fhi /= 2
+            side = 1
+    return (lo + hi) / 2
+
+
+def first_root(fn, grid, tol):
+    """격자에서 처음 부호가 바뀌는 구간의 근. 파생 = 전체 − 일반사채는 스프레드에 대해 오르다 내려가므로
+    (높은 스프레드에서는 Put·전환 하한에 막힘) 낮은 쪽 근을 고른다."""
+    vals = [(s, fn(s)) for s in grid]
+    for (a, fa), (b, fb) in zip(vals, vals[1:]):
+        if fa == 0:
+            return a
+        if fa * fb < 0:
+            return _solve(fn, a, b, tol)
+    return None
+
+
+def _series_fields(corp, it, items, date, acts):
+    """CB·BW·EB 회차의 date 기준 입력값 (발행조건 + 조정·잔액 이력 + 병합·분할)."""
+    f = dart.parse_cb(it["raw"], it["kind"])
+    hist = dart.history(corp["corp_code"], it["bd_tm"], it["kind"], items, date)
+    dart.apply_history(f, hist, date)
+    dart.adjust_for_actions(f, acts, dart.kdate(it.get("bddd")), date, hist)
+    return f
+
+
+_PCT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+
+
+BOOK_GRADES = ("BBB+", "BBB0", "BBB-", "BB+", "BB0", "BB-", "B+", "B0", "B-", "CCC+")
+BOOK_TOL = 0.15
+
+
+def company_spread(corp, items, val_date, ras, cv, fallback="B+"):
+    """회사별 할인율 (나이스 등급이 없는 회사용). 평가기준일 직전 정기보고서 주석에 회차별 파생상품부채가 공시된 CB·BW·EB를 골라
+    보고기간 말 시장자료로 다시 계산해, 그 장부값(= 회사·외부평가사가 쓴 할인율의 결과)을 맞추는 신용 가정을 찾는다.
+      사내 (법인 서버 등급 곡선): BBB+ ~ CCC+ 곡선 중 재계산 파생이 장부에 가장 가까운 등급 (차이 15% 이내만)
+      외부 웹 (붙여넣은 Rf 하나): Rd = Rf + s 의 s
+    회차별 값이 없고 주석에 할인율(위험이자율)만 있으면 그 중간값 − Rf 를 스프레드로 쓴다. 둘 다 없으면 None."""
+    rep = notes.pick_report(items, val_date)
+    if not rep:
+        return None
+    per = rep["period"]
+    key = ("cspread", corp["corp_code"], rep["rcept_no"], None if ras is not None else repr((cv.rf, cv.rd)))
+
+    def run():
+        allx = _memo(("cb_list", corp["corp_code"]), lambda: dart.cb_list(corp["corp_code"]), ttl=1800)
+        groups = {}
+        for it in allx:
+            groups.setdefault((it["kind"], it["bd_tm"] or it["rcept_no"]), []).append(it)
+        latest = sorted((max(xs, key=lambda x: x["rcept_no"]) for xs in groups.values()), key=lambda x: x["rcept_no"], reverse=True)
+        acts = dart.corporate_actions(corp["corp_code"], items)
+        rf = cv.get(per, fallback)["rf"]
+        mk = None
+        hint = None
+        miss = None
+        live = []
+
+        def fit(it, f, v, b, how):
+            nonlocal mk
+            tag = f"{it['kind']} {it['bd_tm']}회"
+            if mk is None:
+                mk = _stock(ras, corp["stock_code"], per, corp.get("corp_cls"))
+            st = _state(f, per, it["kind"], mk["price"], mk["vol"], rf, None)
+            deriv = lambda rd: (lambda r: r["전체가치"] - (r.get("일반사채") or 0))(value_state(dict(st, curves={"rf": rf, "rd": rd})))
+            base = {"period": per, "bd_tm": it["bd_tm"], "book": b, "how": "장부 역산"}
+            if ras is not None:
+                pre = "" if (v.get("사모여부") or "사모") != "공모" else "공모부"
+                best = None
+                for g in BOOK_GRADES:
+                    gap = (deriv(cv.get(per, pre + g)["rd"]) - b) / b
+                    if best is None or abs(gap) < abs(best[1]):
+                        best = (g, gap)
+                if abs(best[1]) <= BOOK_TOL:
+                    return dict(base, grade=best[0], gap=best[1],
+                                src=f"장부 역산 {best[0]} ({tag} {how} {b / 1e8:,.1f}억 · {per} 재계산 {best[1]:+.1%}"
+                                    + (" · 찾는 범위 끝 등급 — 실제는 더 " + ("높을" if best[0] == BOOK_GRADES[0] else "낮을") + " 수 있음" if best[0] in (BOOK_GRADES[0], BOOK_GRADES[-1]) else "") + ")"), None
+                return None, f"{tag} {how} {b / 1e8:,.1f}억 — 어느 등급으로도 {BOOK_TOL:.0%} 안에 안 맞음 (가장 가까운 {best[0]} {best[1]:+.0%}, 조건 차이 의심)"
+            s = first_root(lambda s: deriv(rd_from_spread(rf, s)) - b, [0.0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.6], b * 1e-3)
+            if s is not None:
+                return dict(base, spread=s, src=f"장부 역산 Rf+{s * 100:.1f}%p ({tag} {how} {b / 1e8:,.1f}억 · {per})"), None
+            return None, f"{tag} {how} {b / 1e8:,.1f}억 — Rf+0~60%p로 맞출 수 없음 (조건 차이 의심)"
+
+        for it in latest[:8]:
+            try:
+                f = _series_fields(corp, it, items, per, acts)
+                v = {k: (x or {}).get("value") for k, x in f.items()}
+                if not v.get("발행일") or v["발행일"] > per or not v.get("만기일") or v["만기일"] <= per or not v.get("잔여총액"):
+                    continue
+                bk = notes.book_values(rep["rcept_no"], it["kind"], it["bd_tm"], v.get("발행총액"))
+                live.append((it, f, v, bk))
+                T = engine.yf(dt.date.fromisoformat(per), dt.date.fromisoformat(v["만기일"]))
+                rates = sorted(float(x) for x in _PCT.findall(bk.get("assume", {}).get("할인율") or ""))
+                if rates and hint is None:
+                    n = len(rates)
+                    mid = rates[n // 2] if n % 2 else (rates[n // 2 - 1] + rates[n // 2]) / 2
+                    hint = {"spread": (mid - (_par(engine.RF_TENORS, rf, T) or 0)) / 100, "period": per, "bd_tm": it["bd_tm"],
+                            "how": "주석 할인율", "src": f"주석 할인율 {bk['assume']['할인율']} 중간값 − Rf ({it['kind']} {it['bd_tm']}회 · {per})"}
+                b = bk.get("derivative")
+                if b is None or not str(bk.get("scope") or "").startswith("회차") or b <= 0:
+                    continue
+                got, why = fit(it, f, v, b, "파생")
+                if got:
+                    return got
+                miss = miss or why
+            except Exception:
+                continue
+        if len(live) == 1 and miss is None:
+            it, f, v, bk = live[0]
+            tot = bk.get("total_derivative")
+            if tot and tot > 0:
+                ks = [k for k in (1, 1000, 1e6) if 0.003 <= tot * k / v["잔여총액"] <= 1.5]
+                if len(ks) == 1:
+                    try:
+                        got, why = fit(it, f, v, tot * ks[0], "파생 합계(남은 회차 1개)")
+                        if got:
+                            return got
+                        miss = why
+                    except Exception:
+                        pass
+        if hint and miss:
+            hint["src"] += " · " + miss
+        return hint or ({"miss": miss} if miss else None)
+    return _memo(key, run, ttl=6 * 3600)
+
+
+def _rates(ras, cv, corp, date, private, credit, cs):
+    """곡선 고르기: 나이스 등급(켠 경우, 찾으면) → 회사별 할인율(장부 역산 등급·스프레드 → 주석 할인율) → 일괄 신용 가정."""
+    grade, gsrc = _grade(ras, corp, date, private, credit.get("mode"), credit.get("fallback") or "B+")
+    nice_hit = gsrc.startswith("나이스 ") and "→" not in gsrc
+    if cs and cs.get("grade") and not nice_hit:
+        g = cs["grade"] if private else "공모부" + cs["grade"]
+        c = cv.get(date, g)
+        return c["rf"], c["rd"], g, cs["src"]
+    c = cv.get(date, grade)
+    if cs and cs.get("spread") is not None and not nice_hit:
+        return c["rf"], rd_from_spread(c["rf"], cs["spread"]), f"Rf+{cs['spread'] * 100:.1f}%p", cs["src"]
+    if credit.get("company") and not nice_hit:
+        gsrc = ((cs or {}).get("miss") or "장부·주석 할인율 없음") + " → " + gsrc
+    return c["rf"], c["rd"], grade, gsrc
+
+
 def _cb_candidates(corp, since):
     """회사의 CB·BW·EB 발행결정(2015~) → (상품, 회차)별 최신 정정본, 기간 안에 공시된 회차만."""
     allx = _memo(("cb_list", corp["corp_code"]), lambda: dart.cb_list(corp["corp_code"]), ttl=1800)
@@ -180,7 +343,7 @@ def _rcps_candidates(corp, since, items):
     return out
 
 
-def _book_side(row, f, v, kind, corp, items, ras, cv, credit, private, val_date):
+def _book_side(row, f, v, kind, corp, items, ras, cv, credit, private, val_date, cs=None):
     """장부 대조: 평가기준일에 맞는 정기보고서 주석의 회차 파생상품부채(공정가치)와 보고기간 말 재계산값."""
     rep = notes.pick_report(items, val_date)
     if not rep or (v.get("발행일") and v["발행일"] > rep["period"]):
@@ -193,15 +356,16 @@ def _book_side(row, f, v, kind, corp, items, ras, cv, credit, private, val_date)
             row["notes"].append(f"장부 파생상품부채는 회차 합계만 공시 ({bk['total_derivative'] / 1e8:,.1f}억 · 회차 {len(bk['series_seen'])}개)")
         return
     mk = _stock(ras, corp["stock_code"], per, corp.get("corp_cls"))
-    grade, _ = _grade(ras, corp, per, private, credit.get("mode"), credit.get("fallback") or "B+")
-    c = cv.get(per, grade)
-    res = value_state(_state(f, per, kind, mk["price"], mk["vol"], c["rf"], c["rd"]))
+    rf, rd, _, _ = _rates(ras, cv, corp, per, private, credit, cs)
+    res = value_state(_state(f, per, kind, mk["price"], mk["vol"], rf, rd))
     calc = res["전체가치"] if kind in ("RCPS", "CPS") else res["전체가치"] - (res.get("일반사채") or 0)
     b = bk["derivative"]
     row.update({"book_deriv": b, "calc_deriv": calc, "book_gap": (calc - b) / abs(b) * 100 if b else None,
                 "book_scope": bk.get("scope"), "book_model": bk.get("model")})
     if bk.get("scope") == "회차(단일)":
         row["notes"].append("장부 파생 = 공정가치 서열체계 합계 (공시된 회차가 하나)")
+    if cs and cs.get("how") == "장부 역산" and str(cs.get("bd_tm")) == str(row.get("bd_tm")) and cs.get("period") == per:
+        row["notes"].append("이 회차 장부로 할인율을 역산했으므로 장부 차이 ≈ 0 (검증용 아님)")
 
 
 def value_corp(corp, val_date, since, kinds=("CB", "BW", "EB"), credit=None, curves=None, at_issue=False, ras=None, book=False):
@@ -219,6 +383,12 @@ def value_corp(corp, val_date, since, kinds=("CB", "BW", "EB"), credit=None, cur
         for s in _rcps_candidates(corp, since, items):
             cands.append(("rcps", s))
     acts = None
+    cs = None
+    if credit.get("company") and cands:
+        try:
+            cs = company_spread(corp, items, val_date, ras, cv, credit.get("fallback") or "B+")
+        except Exception:
+            cs = None
     for typ, it in cands:
         row = {"corp_code": corp["corp_code"], "corp_name": corp["corp_name"], "stock_code": corp.get("stock_code"),
                "corp_cls": corp.get("corp_cls"), "status": "ok", "notes": []}
@@ -226,12 +396,9 @@ def value_corp(corp, val_date, since, kinds=("CB", "BW", "EB"), credit=None, cur
             if typ == "cb":
                 kind = it["kind"]
                 row.update({"kind": kind, "bd_tm": it["bd_tm"], "rcept_no": it["rcept_no"], "key": None})
-                f = dart.parse_cb(it["raw"], kind)
-                hist = dart.history(corp["corp_code"], it["bd_tm"], kind, items, val_date)
-                dart.apply_history(f, hist, val_date)
                 if acts is None:
                     acts = dart.corporate_actions(corp["corp_code"], items)
-                dart.adjust_for_actions(f, acts, dart.kdate(it.get("bddd")), val_date, hist)
+                f = _series_fields(corp, it, items, val_date, acts)
                 if kind == "EB":
                     row["notes"].append("EB — 교환대상 주식이 자기주식(발행회사 주식)이라고 보고 평가")
             else:
@@ -256,7 +423,7 @@ def value_corp(corp, val_date, since, kinds=("CB", "BW", "EB"), credit=None, cur
             private = (v.get("사모여부") or "사모") != "공모"
             if v.get("발행일") and v["발행일"] > val_date:
                 row["status"] = "발행 예정"
-                _issue_side(row, f, v, kind, corp, ras, cv, credit, private, mkt_date=val_date)
+                _issue_side(row, f, v, kind, corp, ras, cv, credit, private, mkt_date=val_date, cs=cs)
                 rows.append(row)
                 continue
             if not v.get("잔여총액"):
@@ -269,9 +436,8 @@ def value_corp(corp, val_date, since, kinds=("CB", "BW", "EB"), credit=None, cur
             if abs(div - 1) > 1e-9:
                 S = S / div
                 row["notes"].append(f"평가기준일 이후 병합·분할 → 주가 ÷ {div:g}")
-            grade, gsrc = _grade(ras, corp, val_date, private, credit.get("mode"), credit.get("fallback") or "B+")
-            c = cv.get(val_date, grade)
-            st = _state(f, val_date, kind, S, mk["vol"], c["rf"], c["rd"])
+            rf, rd, grade, gsrc = _rates(ras, cv, corp, val_date, private, credit, cs)
+            st = _state(f, val_date, kind, S, mk["vol"], rf, rd)
             res = value_state(st)
             face = v["잔여총액"]
             pct = lambda k: (res.get(k) / face * 100) if res.get(k) is not None else None
@@ -282,10 +448,10 @@ def value_corp(corp, val_date, since, kinds=("CB", "BW", "EB"), credit=None, cur
                         "put_pct": pct("Put"), "conv_pct": pct("전환권"), "call_pct": pct("Call"),
                         "price_date": mk["price_date"], "vol_src": mk["source"]})
             if at_issue and v.get("발행일"):
-                _issue_side(row, f, v, kind, corp, ras, cv, credit, private)
+                _issue_side(row, f, v, kind, corp, ras, cv, credit, private, cs=cs)
             if book:
                 try:
-                    _book_side(row, f, v, kind, corp, items, ras, cv, credit, private, val_date)
+                    _book_side(row, f, v, kind, corp, items, ras, cv, credit, private, val_date, cs)
                 except Exception as ex:
                     row["notes"].append(f"장부 대조 실패: {str(ex)[:50]}")
         except Exception as ex:
@@ -294,7 +460,7 @@ def value_corp(corp, val_date, since, kinds=("CB", "BW", "EB"), credit=None, cur
     return rows
 
 
-def _issue_side(row, f, v, kind, corp, ras, cv, credit, private, mkt_date=None):
+def _issue_side(row, f, v, kind, corp, ras, cv, credit, private, mkt_date=None, cs=None):
     """발행일 기준: 최초 전환가·발행총액으로 이론가치(발행가 100 기준)와 내재 스프레드.
     mkt_date: 시장자료(주가·변동성·곡선) 날짜 — 발행 예정 회차는 평가기준일 값을 쓴다."""
     iss = v["발행일"]
@@ -308,8 +474,8 @@ def _issue_side(row, f, v, kind, corp, ras, cv, credit, private, mkt_date=None):
     except Exception as ex:
         row["notes"].append(f"발행일 주가 없음: {str(ex)[:40]}")
         return
-    grade, gsrc = _grade(ras, corp, md, private, credit.get("mode"), credit.get("fallback") or "B+")
-    c = cv.get(md, grade)
+    rf, rd, grade, gsrc = _rates(ras, cv, corp, md, private, credit, cs)
+    c = {"rf": rf, "rd": rd}
     target = f0["잔여총액"]["value"]
     res = value_state(_state(f0, iss, kind, mk["price"], mk["vol"], c["rf"], c["rd"]))
     row.update({"issue_S": mk["price"], "issue_sigma": mk["vol"], "issue_grade": grade, "issue_mkt_date": mk["price_date"],

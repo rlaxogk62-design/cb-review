@@ -525,25 +525,13 @@ def book_check(st):
 
 
 def _book_spread(st2, rf, target):
-    """장부 파생상품부채(전체 − 일반사채)를 맞추는 Rd − Rf. 파생 = 전체 − 일반사채는 스프레드가 클수록 커진다."""
-    def deriv(s):
+    """장부 파생상품부채(전체 − 일반사채)를 맞추는 Rd − Rf (%p). 파생은 스프레드에 대해 오르다 내려가므로 낮은 쪽 근."""
+    def g(s):
         st3 = dict(st2, curves={"rf": rf, "rd": screen.rd_from_spread(rf, s)})
         r = engine.value(engine_params(st3))["result"]
-        return (r.get("전체가치") or 0) - (r.get("일반사채") or 0)
-    lo, hi = 0.0, 0.6
-    flo, fhi = deriv(lo) - target, deriv(hi) - target
-    if flo * fhi > 0:
-        return None
-    for _ in range(30):
-        mid = (lo + hi) / 2
-        fm = deriv(mid) - target
-        if abs(fm) <= abs(target) * 1e-3 or hi - lo < 1e-4:
-            return mid * 100
-        if (fm > 0) == (fhi > 0):
-            hi, fhi = mid, fm
-        else:
-            lo, flo = mid, fm
-    return (lo + hi) / 2 * 100
+        return (r.get("전체가치") or 0) - (r.get("일반사채") or 0) - target
+    s = screen.first_root(g, [0.0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.6], abs(target) * 1e-3)
+    return None if s is None else s * 100
 
 
 def screen_corp(body):

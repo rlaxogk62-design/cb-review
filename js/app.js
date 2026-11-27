@@ -218,52 +218,8 @@ async function loadIssue(it, keepManual = false) {
     startWatch();
   } catch (e) { toast(e.message, true, 8000); busy(false); return false; }
   busy(false);
-  loadBorrow();
   await autoMarketData();
   return true;
-}
-
-/* ------------------------------------------------------------ 할인율 참고: 주석 차입이자율 · 발행시점 역산 스프레드 */
-const pct2 = (x) => (x == null ? '-' : `${(+x).toFixed(2)}%`);
-async function loadBorrow() {
-  const el = $('#borrowLine');
-  el.textContent = ''; el.title = ''; st.borrow = null;
-  if (!st.issue || isSO() || isOpt()) return;
-  try {
-    const r = await api(`/api/borrow?corp_code=${st.corp.corp_code}&val_date=${$('#val_date').value}`);
-    st.borrow = r;
-    if (!r.n) { el.textContent = '주석 차입금 이자율: 찾지 못함'; return; }
-    el.textContent = `주석 차입이자율 ${pct2(r.min)} ~ ${pct2(r.max)} (중앙 ${pct2(r.median)} · ${r.n}건 · ${r.report.report_nm})`;
-    el.title = r.items.map((x) => `${x.kind || ''} ${x.lender} ${x.rate}%${x.amount ? ' · ' + fmt(x.amount) : ''}`).join('\n');
-  } catch (e) { el.textContent = ''; }
-}
-async function doImplied() {
-  const box = $('#spreadBox');
-  box.innerHTML = '<span class="muted">발행일 주가·변동성·국고채로 발행가에 맞는 스프레드를 역산하는 중…</span>';
-  try {
-    const r = await api('/api/implied', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload()) });
-    if (r.spread == null) { box.innerHTML = `<span class="warnc">${esc(r.why || '역산하지 못했습니다.')}</span>`; return; }
-    let h = `<b>내재 스프레드 Rf + ${r.spread.toFixed(2)}%p</b> — 발행일(${esc(r.issue_date)}) 이론가치가 발행가와 같아지는 Rd − Rf`
-      + `<div class="muted">${esc(r.stock)} · ${esc(r.rf_src)}${(r.notes || []).map((n) => ' · ' + esc(n)).join('')}</div>`;
-    if (r.grade_spread != null) {
-      const d = r.spread - r.grade_spread;
-      h += `<div>지금 Rd 곡선(${esc($('#credit_grade').value || '입력값')})의 잔존 ${r.T.toFixed(1)}년 스프레드 ${r.grade_spread.toFixed(2)}%p → `
-        + (Math.abs(d) < 0.5 ? '내재 스프레드와 비슷합니다.'
-          : d > 0 ? `내재보다 ${d.toFixed(2)}%p 낮음 — 이 곡선으로 평가하면 발행시점 이론가치가 발행가보다 높게 나옵니다.`
-            : `내재보다 ${(-d).toFixed(2)}%p 높음 — 이 곡선으로 평가하면 발행시점 이론가치가 발행가보다 낮게 나옵니다.`) + '</div>';
-    }
-    if (st.borrow && st.borrow.n) h += `<div class="muted">참고 — 주석 차입이자율 ${pct2(st.borrow.min)} ~ ${pct2(st.borrow.max)}</div>`;
-    if (r.rd) h += `<button id="btnUseSpread" class="ghost">이 스프레드로 Rd 채우기 (평가기준일 Rf + ${r.spread.toFixed(2)}%p)</button>`;
-    box.innerHTML = h;
-    if (r.rd) {
-      $('#btnUseSpread').onclick = () => {
-        $('#rd').value = r.rd.join('\t');
-        curveCount(); markStale();
-        $('#curveNote').textContent = `Rd = 평가기준일 Rf + 발행시점 내재 스프레드 ${r.spread.toFixed(2)}%p (등급 곡선 아님 — Temp DU·EL 등급코드는 따로 확인).`;
-        toast('Rd를 내재 스프레드 곡선으로 바꿨습니다. [평가 계산]을 다시 누르세요.');
-      };
-    }
-  } catch (e) { box.innerHTML = `<span class="warnc">${esc(e.message)}</span>`; }
 }
 
 /* ------------------------------------------------------------ 장부 대조 */
@@ -315,7 +271,7 @@ const SC_COLS = [
   ['corp_name', '회사', 'l'], ['tm', '상품·회차', 'l'], ['status', '상태', 'st'],
   ['issue_date', '발행일', 'd'], ['maturity', '만기', 'd'], ['face', '잔액(억)', 'eok'], ['private', '사모', 'l'],
   ['conv_price', '전환가', 'n0'], ['S', '주가', 'n0'], ['par', '패리티', 'p1'], ['sigma', '변동성', 'v'],
-  ['ytm', 'YTM', 'r'], ['ytp', 'YTP', 'r'], ['refix', '리픽싱', 'l'], ['call_ratio', 'Call', 'r0'], ['grade', '신용 가정', 'l'],
+  ['ytm', 'YTM', 'r'], ['ytp', 'YTP', 'r'], ['refix', '리픽싱', 'l'], ['call_ratio', 'Call', 'r0'], ['grade', '신용 가정', 'l'], ['grade_src', '할인율 근거', 'nt'],
   ['value_pct', '이론가치', 'p1'], ['bond_pct', '일반사채', 'p1'], ['opt_pct', '옵션', 'p1'],
   ['issue_value_pct', '발행시점 이론가치', 'up'], ['implied_spread', '내재 스프레드', 'sp'], ['grade_spread', '등급 스프레드', 'sp'],
   ['spread_gap', '차이', 'gap'], ['book_deriv', '장부 파생', 'eok1'], ['calc_deriv', '재계산 파생', 'eok1'], ['book_gap', '장부 차이', 'bg'],
@@ -333,7 +289,7 @@ function scDerive(r) {
   if (r.issue_value_pct != null && r.issue_value_pct > 300) why.push(`발행시점 이론가치 ${r.issue_value_pct.toFixed(0)}`);
   r.outlier = why.length ? why.join('·') : '';
   if (r.outlier) r.notes = [`⚠ 이상치 확인 (${r.outlier}) — 주가 시계열 병합·감자·거래정지 또는 전환가 파싱 확인`, ...(r.notes || [])];
-  r.note = (r.notes || []).join(' / ') + (r.grade_src ? (r.notes && r.notes.length ? ' / ' : '') + r.grade_src : '');
+  r.note = (r.notes || []).join(' / ');
   if (r.status === 'ok') r.status = '';
   if (r.outlier && !r.status) r.status = '이상치 확인';
   return r;
@@ -412,7 +368,7 @@ async function scRun() {
   const since = new Date(vd); since.setMonth(since.getMonth() - Number($('#scMonths').value));
   const sinceS = since.toISOString().slice(0, 10);
   const base = { val_date: vd, since: sinceS, kinds, at_issue: $('#scIssue').checked, book: $('#scBook').checked,
-    credit: { mode: $('#scNice').checked ? 'nice' : 'fixed', fallback: $('#scGrade').value } };
+    credit: { mode: $('#scNice').checked ? 'nice' : 'fixed', fallback: $('#scGrade').value, company: $('#scCompany').checked } };
   if (window.CBR_WEB) {
     base.rf = scSplit('#scRf'); base.rd = scSplit('#scRd');
     if (base.rf.length < 2 || base.rd.length < 2) { toast('외부 웹은 Rf·Rd 곡선을 붙여넣어야 합니다 (신용 가정 등급의 곡선).', true, 6000); return; }
@@ -484,10 +440,8 @@ function measureDate() {
 function applyKindLayout(it, prevKind) {
   const so = it.kind === 'SO';
   $('#peerBox').classList.toggle('hidden', !unlisted());
-  $('#spreadWrap').classList.toggle('hidden', so || it.kind === 'OPT');
   $('#bookCard').classList.toggle('hidden', so || it.kind === 'OPT');
   $('#bookBox').innerHTML = ''; $('#bookTag').textContent = '';
-  $('#spreadBox').innerHTML = '';
   $('#soNote').classList.toggle('hidden', !(so || it.kind === 'OPT'));
   if (it.kind === 'OPT') {
     $('#soNote').textContent = '풋·콜옵션: 행사가·이율·기산일·행사기간·수량을 계약서로 넣으세요. Temp SO 시트처럼 Put은 Rd, Call은 Rf로 할인합니다 (SO후속 — 할인 칸에서 바꿀 수 있음). '
@@ -1211,9 +1165,7 @@ window.addEventListener('DOMContentLoaded', () => {
   ['#S', '#sigma', '#steps_per_year'].forEach((id) => $(id).addEventListener('change', () => { st.market.source = '수동 입력'; markStale(); }));
   $('#val_date').addEventListener('change', () => { if (st.issue) loadIssue(st.issue, true); });
   $('#btnCurves').onclick = async () => { st.gradeManual = false; await loadCredit(); await loadCurves(); };
-  $('#btnImplied').onclick = doImplied;
   $('#btnBook').onclick = doBook;
-  $('#btnBook2').onclick = () => { $('#bookCard').scrollIntoView({ behavior: 'smooth', block: 'start' }); doBook(); };
   document.querySelectorAll('#tabs .tab').forEach((b) => { b.onclick = () => showTab(b.dataset.tab); });
   if (location.hash === '#screen') showTab('screen');
   $('#placement').addEventListener('change', async () => { st.gradeManual = false; await loadCredit(); await loadCurves(); });

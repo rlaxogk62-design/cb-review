@@ -150,16 +150,6 @@ table.assume td:last-child { white-space: nowrap; font-size: 12px; }
 .tab { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; padding: 10px 14px; color: var(--muted); font-weight: 700; }
 .tab.on { color: var(--ink); border-bottom-color: var(--accent); }
 /* 내재 스프레드 · 차입이자율 */
-.spreadwrap { margin: 10px 0 6px; padding: 10px 12px; border: 1px solid var(--line); border-left: 3px solid var(--accent, #E8702A); background: #FFFBF5; }
-.swhead { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
-.swrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 4px 0; font-size: 12.5px; }
-.swno { font-weight: 700; }
-.swlab { font-weight: 600; min-width: 150px; }
-button.sm { padding: 4px 12px; font-size: 12px; margin: 0; }
-.spreadrow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.spreadrow .ghost { margin-top: 0; }
-#spreadBox:empty { display: none; }
-#spreadBox { margin-top: 6px; background: var(--info-bg); border-radius: 10px; padding: 8px 12px; font-size: 13px; }
 /* 딜 스크리닝 */
 .grid4 { display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 8px 12px; align-items: end; }
 .kinds { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
